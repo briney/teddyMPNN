@@ -31,6 +31,10 @@ dev = [
     "mypy>=1.0",
     "pre-commit>=3.0",
 ]
+data = [
+    "aiohttp>=3.8",
+    "zstandard>=0.20",
+]
 train = [
     "wandb>=0.15",
 ]

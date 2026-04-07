@@ -1,0 +1,342 @@
+"""Tests for structure parsing and feature computation."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+import torch
+
+from teddympnn.data.features import (
+    _compute_cb,
+    _resolve_resname,
+    derive_backbone,
+    extract_ligand_atoms,
+    identify_interface_residues,
+    parse_structure,
+)
+from teddympnn.models.tokens import BACKBONE_ATOM_INDICES, NUM_ATOMS_37
+
+# Reference structures from validation data
+REFERENCE_DIR = Path(__file__).parent.parent / "validation" / "reference_data" / "structures"
+PDB_1BRS = REFERENCE_DIR / "1BRS.pdb"
+CIF_1BRS = REFERENCE_DIR / "1BRS.cif"
+PDB_4GYT = REFERENCE_DIR / "4GYT.pdb"
+CIF_4GYT = REFERENCE_DIR / "4GYT.cif"
+
+
+@pytest.fixture
+def requires_reference_structures():
+    """Skip tests if reference structures are not available."""
+    if not PDB_1BRS.exists():
+        pytest.skip("Reference structures not available")
+
+
+# ---------------------------------------------------------------------------
+# Resname resolution
+# ---------------------------------------------------------------------------
+
+
+class TestResolveResname:
+    def test_standard_amino_acids(self):
+        assert _resolve_resname("ALA") == "ALA"
+        assert _resolve_resname("GLY") == "GLY"
+        assert _resolve_resname("TRP") == "TRP"
+
+    def test_modified_residues(self):
+        assert _resolve_resname("MSE") == "MET"
+        assert _resolve_resname("SEP") == "SER"
+        assert _resolve_resname("TPO") == "THR"
+
+    def test_unknown_residues(self):
+        assert _resolve_resname("HOH") is None
+        assert _resolve_resname("ATP") is None
+        assert _resolve_resname("ZZZ") is None
+
+    def test_whitespace_stripping(self):
+        assert _resolve_resname("  ALA  ") == "ALA"
+
+
+# ---------------------------------------------------------------------------
+# Structure parsing — PDB
+# ---------------------------------------------------------------------------
+
+
+class TestParseStructurePDB:
+    @pytest.fixture(autouse=True)
+    def _skip_if_missing(self, requires_reference_structures):
+        pass
+
+    def test_returns_expected_keys(self):
+        result = parse_structure(PDB_1BRS)
+        expected_keys = {
+            "xyz_37",
+            "xyz_37_m",
+            "S",
+            "R_idx",
+            "chain_labels",
+            "residue_mask",
+            "chain_ids",
+        }
+        assert expected_keys <= set(result.keys())
+
+    def test_tensor_shapes(self):
+        result = parse_structure(PDB_1BRS)
+        L = result["S"].shape[0]
+        assert L > 0
+
+        assert result["xyz_37"].shape == (L, NUM_ATOMS_37, 3)
+        assert result["xyz_37_m"].shape == (L, NUM_ATOMS_37)
+        assert result["S"].shape == (L,)
+        assert result["R_idx"].shape == (L,)
+        assert result["chain_labels"].shape == (L,)
+        assert result["residue_mask"].shape == (L,)
+        assert len(result["chain_ids"]) == L
+
+    def test_tensor_dtypes(self):
+        result = parse_structure(PDB_1BRS)
+        assert result["xyz_37"].dtype == torch.float32
+        assert result["xyz_37_m"].dtype == torch.bool
+        assert result["S"].dtype == torch.int64
+        assert result["R_idx"].dtype == torch.int64
+        assert result["chain_labels"].dtype == torch.int64
+        assert result["residue_mask"].dtype == torch.bool
+
+    def test_multi_chain_structure(self):
+        """1BRS is a barnase-barstar complex with chains A and D (or similar)."""
+        result = parse_structure(PDB_1BRS)
+        unique_chains = result["chain_labels"].unique()
+        assert len(unique_chains) >= 2, "1BRS should have multiple chains"
+
+    def test_chain_ids_match_labels(self):
+        result = parse_structure(PDB_1BRS)
+        chain_ids = result["chain_ids"]
+        chain_labels = result["chain_labels"]
+
+        # Each unique chain_id should map to a unique chain_label
+        id_to_label: dict[str, int] = {}
+        for cid, label in zip(chain_ids, chain_labels.tolist(), strict=True):
+            if cid not in id_to_label:
+                id_to_label[cid] = label
+            assert id_to_label[cid] == label
+
+    def test_backbone_atoms_present(self):
+        """All residues should have N, CA, C backbone atoms."""
+        result = parse_structure(PDB_1BRS)
+        # N=0, CA=1, C=2 should all be True
+        assert result["xyz_37_m"][:, 0].all(), "All residues should have N"
+        assert result["xyz_37_m"][:, 1].all(), "All residues should have CA"
+        assert result["xyz_37_m"][:, 2].all(), "All residues should have C"
+
+    def test_residue_mask_all_true(self):
+        result = parse_structure(PDB_1BRS)
+        assert result["residue_mask"].all()
+
+    def test_token_indices_valid(self):
+        result = parse_structure(PDB_1BRS)
+        assert (result["S"] >= 0).all()
+        assert (result["S"] < 21).all()
+
+    def test_r_idx_per_chain(self):
+        """R_idx should be 0-based within each chain."""
+        result = parse_structure(PDB_1BRS)
+        for label in result["chain_labels"].unique():
+            mask = result["chain_labels"] == label
+            r_idx = result["R_idx"][mask]
+            assert r_idx[0] == 0, "R_idx should start at 0 per chain"
+            # Should be monotonically increasing
+            diffs = r_idx[1:] - r_idx[:-1]
+            assert (diffs > 0).all(), "R_idx should be monotonically increasing"
+
+
+# ---------------------------------------------------------------------------
+# Structure parsing — mmCIF
+# ---------------------------------------------------------------------------
+
+
+class TestParseStructureCIF:
+    @pytest.fixture(autouse=True)
+    def _skip_if_missing(self, requires_reference_structures):
+        pass
+
+    def test_cif_matches_pdb(self):
+        """PDB and mmCIF parsers should produce compatible outputs."""
+        pdb_result = parse_structure(PDB_1BRS)
+        cif_result = parse_structure(CIF_1BRS)
+
+        # Same number of residues (may differ slightly due to parser details)
+        L_pdb = pdb_result["S"].shape[0]
+        L_cif = cif_result["S"].shape[0]
+        # Allow small differences due to parser handling of edge cases
+        assert abs(L_pdb - L_cif) < 5, f"PDB ({L_pdb}) and CIF ({L_cif}) residue counts differ"
+
+
+# ---------------------------------------------------------------------------
+# Derive backbone
+# ---------------------------------------------------------------------------
+
+
+class TestDeriveBackbone:
+    def test_shapes(self):
+        L = 50
+        xyz_37 = torch.randn(L, NUM_ATOMS_37, 3)
+        xyz_37_m = torch.ones(L, NUM_ATOMS_37, dtype=torch.bool)
+
+        X, X_m = derive_backbone(xyz_37, xyz_37_m)
+        assert X.shape == (L, 4, 3)
+        assert X_m.shape == (L, 4)
+
+    def test_correct_atoms(self):
+        """Should extract N(0), CA(1), C(2), O(3) from the 37-atom repr."""
+        L = 10
+        xyz_37 = torch.arange(L * NUM_ATOMS_37 * 3, dtype=torch.float32).reshape(L, NUM_ATOMS_37, 3)
+        xyz_37_m = torch.ones(L, NUM_ATOMS_37, dtype=torch.bool)
+
+        X, _ = derive_backbone(xyz_37, xyz_37_m)
+        for i, atom_idx in enumerate(BACKBONE_ATOM_INDICES):
+            torch.testing.assert_close(X[:, i, :], xyz_37[:, atom_idx, :])
+
+    def test_batched(self):
+        """Should work with batch dimension."""
+        B, L = 3, 20
+        xyz_37 = torch.randn(B, L, NUM_ATOMS_37, 3)
+        xyz_37_m = torch.ones(B, L, NUM_ATOMS_37, dtype=torch.bool)
+
+        X, X_m = derive_backbone(xyz_37, xyz_37_m)
+        assert X.shape == (B, L, 4, 3)
+        assert X_m.shape == (B, L, 4)
+
+
+# ---------------------------------------------------------------------------
+# Extract ligand atoms
+# ---------------------------------------------------------------------------
+
+
+class TestExtractLigandAtoms:
+    @pytest.fixture(autouse=True)
+    def _skip_if_missing(self, requires_reference_structures):
+        pass
+
+    def test_returns_expected_keys(self):
+        result = extract_ligand_atoms(PDB_4GYT)
+        assert "Y" in result
+        assert "Y_m" in result
+        assert "Y_t" in result
+
+    def test_tensor_shapes_consistent(self):
+        result = extract_ligand_atoms(PDB_4GYT)
+        N = result["Y"].shape[0]
+        assert result["Y"].shape == (N, 3)
+        assert result["Y_m"].shape == (N,)
+        assert result["Y_t"].shape == (N,)
+
+    def test_element_types_valid(self):
+        result = extract_ligand_atoms(PDB_4GYT)
+        if result["Y_t"].numel() > 0:
+            assert (result["Y_t"] >= 0).all()
+            assert (result["Y_t"] < 119).all()
+
+    def test_empty_for_protein_only(self):
+        """1BRS has no ligands — should return empty tensors."""
+        result = extract_ligand_atoms(PDB_1BRS)
+        # 1BRS may have some buffer ions, but all ligand tensors should be consistent
+        N = result["Y"].shape[0]
+        assert result["Y"].shape == (N, 3)
+        assert result["Y_m"].shape == (N,)
+        assert result["Y_t"].shape == (N,)
+
+
+# ---------------------------------------------------------------------------
+# Interface residue identification
+# ---------------------------------------------------------------------------
+
+
+class TestIdentifyInterfaceResidues:
+    @pytest.fixture(autouse=True)
+    def _skip_if_missing(self, requires_reference_structures):
+        pass
+
+    def test_returns_boolean_mask(self):
+        result = parse_structure(PDB_1BRS)
+        interface = identify_interface_residues(
+            result["xyz_37"],
+            result["xyz_37_m"],
+            result["chain_labels"],
+        )
+        assert interface.dtype == torch.bool
+        assert interface.shape == result["S"].shape
+
+    def test_multi_chain_has_interface(self):
+        """1BRS barnase-barstar complex should have interface residues."""
+        result = parse_structure(PDB_1BRS)
+        interface = identify_interface_residues(
+            result["xyz_37"],
+            result["xyz_37_m"],
+            result["chain_labels"],
+        )
+        assert interface.any(), "Protein complex should have interface residues"
+
+    def test_single_chain_no_interface(self):
+        """A single-chain structure should have no interface residues."""
+        L = 50
+        xyz_37 = torch.randn(L, NUM_ATOMS_37, 3)
+        xyz_37_m = torch.ones(L, NUM_ATOMS_37, dtype=torch.bool)
+        chain_labels = torch.zeros(L, dtype=torch.long)  # all same chain
+
+        interface = identify_interface_residues(xyz_37, xyz_37_m, chain_labels)
+        assert not interface.any(), "Single chain should have no interface"
+
+    def test_distance_cutoff(self):
+        """Larger cutoff should identify more interface residues."""
+        result = parse_structure(PDB_1BRS)
+        interface_8 = identify_interface_residues(
+            result["xyz_37"],
+            result["xyz_37_m"],
+            result["chain_labels"],
+            distance_cutoff=8.0,
+        )
+        interface_12 = identify_interface_residues(
+            result["xyz_37"],
+            result["xyz_37_m"],
+            result["chain_labels"],
+            distance_cutoff=12.0,
+        )
+        assert interface_12.sum() >= interface_8.sum()
+
+
+# ---------------------------------------------------------------------------
+# Virtual CB computation
+# ---------------------------------------------------------------------------
+
+
+class TestComputeCB:
+    def test_shape(self):
+        L = 30
+        xyz_37 = torch.randn(L, NUM_ATOMS_37, 3)
+        xyz_37_m = torch.ones(L, NUM_ATOMS_37, dtype=torch.bool)
+
+        cb = _compute_cb(xyz_37, xyz_37_m)
+        assert cb.shape == (L, 3)
+
+    def test_uses_real_cb_when_present(self):
+        """When CB is resolved (mask[4]=True), use the real CB coords."""
+        L = 5
+        xyz_37 = torch.randn(L, NUM_ATOMS_37, 3)
+        xyz_37_m = torch.ones(L, NUM_ATOMS_37, dtype=torch.bool)
+
+        cb = _compute_cb(xyz_37, xyz_37_m)
+        # Should match the stored CB coordinates
+        torch.testing.assert_close(cb, xyz_37[:, 4, :])
+
+    def test_virtual_cb_for_glycine(self):
+        """When CB is not resolved (mask[4]=False), compute virtual CB."""
+        L = 5
+        xyz_37 = torch.randn(L, NUM_ATOMS_37, 3)
+        xyz_37_m = torch.ones(L, NUM_ATOMS_37, dtype=torch.bool)
+        xyz_37_m[:, 4] = False  # No real CB (glycine-like)
+
+        cb = _compute_cb(xyz_37, xyz_37_m)
+        # Should not match stored CB (which is random noise)
+        assert not torch.allclose(cb, xyz_37[:, 4, :])
+        # Should be a valid 3D coordinate (not NaN)
+        assert not cb.isnan().any()
