@@ -1,431 +1,692 @@
 # teddyMPNN Architecture
 
-teddyMPNN is a standalone package for fine-tuning ProteinMPNN and LigandMPNN on
-protein-protein interaction data. v1 is centered on interface-aware sequence
-design. Relative binding affinity prediction is a downstream evaluation use case
-built on the same scoring model, not a co-equal training objective.
+Fine-tuning ProteinMPNN and LigandMPNN on protein-protein interaction data for
+interface sequence design and relative binding affinity prediction.
 
 ## Goals
 
-1. Improve interface sequence recovery on protein-protein complexes relative to
-   unfine-tuned ProteinMPNN and LigandMPNN.
-2. Support binder-style redesign by treating one partner group as designable and
-   the other as fixed context.
-3. Preserve checkpoint portability:
-   - initialize from original ProteinMPNN and LigandMPNN checkpoints
-   - export fine-tuned checkpoints that Foundry can strict-load
-4. Keep the package operationally standalone:
-   - no Foundry runtime dependency
-   - no requirement to mirror Foundry's broader data or inference stack
+1. **Interface sequence design** — Improve sequence recovery at protein-protein
+   interfaces beyond what generic ProteinMPNN/LigandMPNN achieve.
+2. **De novo binder design** — Fix a target chain, redesign a binder chain, with
+   interface-aware scoring.
+3. **Relative binding affinity (ddG) prediction** — Use inverse folding
+   log-likelihoods as a proxy for binding free energy changes upon mutation,
+   following the StaB-ddG / BA-DDG thermodynamic decomposition.
 
-## Non-Goals For v1
+## Models
 
-- Reproducing Foundry's runtime API surface exactly
-- Introducing a new protein-partner encoder for LigandMPNN
-- Joint full-complex redesign as the default training mode
-- Supervised ddG fine-tuning
+We reimplement ProteinMPNN and LigandMPNN as standalone PyTorch modules,
+preserving the checkpoint-relevant module hierarchy, attribute names, tensor
+shapes, token ordering, and feature ordering needed for transferable
+`state_dict` loading. This enables:
 
-## Design Principles
+- Loading pretrained weights from Foundry checkpoints without conversion
+- Exporting fine-tuned checkpoints that Foundry users can load directly
 
-- **Standalone runtime**: Use Foundry as a reference implementation, not as a
-  dependency.
-- **Checkpoint parity over runtime parity**: Match parameter names, tensor
-  layouts, token ordering, and feature ordering where portability depends on
-  them.
-- **Native-first artifacts**: Use a teddyMPNN-native checkpoint bundle as the
-  canonical training artifact, with explicit export adapters for Foundry-current
-  and original legacy formats.
-- **Separate adapters, shared contracts**: Keep source-specific data ingestion
-  separate, but normalize all datasets into one internal structure contract.
-- **Bidirectional partner design by default**: Every eligible complex produces
-  two training views by swapping design and context partner groups.
+### ProteinMPNN (1.66M parameters)
 
-## System Overview
-
-```text
-raw structures / source metadata
-    -> dataset-specific adapters
-    -> InterfaceExample
-    -> PartnerDesignView expansion
-    -> model-family-specific batch builder
-    -> ProteinMPNN or LigandMPNN core
-    -> native CheckpointBundle
-    -> explicit export adapters (Foundry-current, legacy original)
+```
+ProteinMPNN (nn.Module)
+├── graph_featurization_module: ProteinFeatures
+│   ├── positional_embedding: PositionalEncodings
+│   │   └── embed_positional_features: Linear(num_embeddings → num_positional_embeddings)
+│   ├── edge_embedding: Linear(num_edge_input_features → num_edge_output_features)
+│   └── edge_norm: LayerNorm(num_edge_output_features)
+├── W_e: Linear(num_edge_features → hidden_dim)
+├── W_s: Embedding(vocab_size, hidden_dim)
+├── encoder_layers: ModuleList[EncLayer × 3]
+│   └── EncLayer
+│       ├── W1, W2, W3: Linear        # node message MLP
+│       ├── W11, W12, W13: Linear      # edge update MLP
+│       ├── norm1, norm2, norm3: LayerNorm
+│       ├── dropout1, dropout2, dropout3: Dropout
+│       └── dense: PositionWiseFeedForward(hidden_dim, hidden_dim * 4)
+├── decoder_layers: ModuleList[DecLayer × 3]
+│   └── DecLayer
+│       ├── W1, W2, W3: Linear
+│       ├── norm1, norm2: LayerNorm
+│       ├── dropout1, dropout2: Dropout
+│       └── dense: PositionWiseFeedForward(hidden_dim, hidden_dim * 4)
+└── W_out: Linear(hidden_dim → vocab_size)
 ```
 
-## Data Contracts
+**Key hyperparameters:**
 
-### InterfaceExample
+| Parameter | Value |
+|-----------|-------|
+| `hidden_dim` | 128 |
+| `num_encoder_layers` | 3 |
+| `num_decoder_layers` | 3 |
+| `num_neighbors` (k) | 48 |
+| `vocab_size` | 21 (20 AA + unknown) |
+| `num_rbf` | 16 |
+| `rbf_range` | 2.0 – 22.0 A |
+| `num_positional_embeddings` | 16 |
+| `aggregation_scale` | 30 |
+| `ffn_expansion` | 4x |
+| `dropout` | 0.1 |
 
-`InterfaceExample` is the normalized parsed-structure record shared by all data
-adapters. It is structure-level, not training-view-level.
+**Backbone representation:** 5 atoms per residue — N, CA, C, O, and a virtual CB
+computed geometrically from N/CA/C. The k-nearest neighbor graph is built from
+CA-CA distances.
 
-Required fields:
+**Edge features:** 25 atom-pair RBF distance encodings (all pairs of
+{N, CA, C, O, CB}) × 16 RBF kernels = 400 dims, concatenated with 16-dim
+positional encodings, projected through Linear + LayerNorm to 128 dims.
 
-| Field | Shape | Purpose |
-| --- | --- | --- |
-| `example_id` | scalar | Stable identifier |
-| `source` | scalar | `teddymer`, `nvidia_complexes`, or `pdb_complexes` |
-| `xyz_37` | `(L, 37, 3)` | Per-residue atom coordinates in one canonical 37-atom order |
-| `xyz_37_mask` | `(L, 37)` | Atom-resolved mask |
-| `S` | `(L,)` | Residue tokens in current token order |
-| `R_idx` | `(L,)` | Residue indices |
-| `chain_ids` | `(L,)` | Original chain identifiers |
-| `chain_labels` | `(L,)` | Integer chain labels |
-| `residue_mask` | `(L,)` | Valid residue mask |
-| `partner_group` | `(L,)` | Integer group label indicating which partner each residue belongs to |
-| `interface_residue_mask` | `(L,)` | Residues participating in the interface |
-| `hetero_Y` | `(N, 3)` | Real non-protein atom coordinates |
-| `hetero_Y_m` | `(N,)` | Real non-protein atom mask |
-| `hetero_Y_t` | `(N,)` | Real non-protein atom types |
-| `metadata` | mapping | Quality scores, provenance, split labels, source-specific annotations |
+**Node features:** Initialized as zeros; learned entirely through message passing.
 
-Notes:
+**Message passing:** Encoder layers update both node and edge hidden states via
+concatenation-based MLP messages with GELU activation, scaled sum aggregation
+(÷30), residual connections, LayerNorm, and position-wise feedforward.
 
-- `xyz_37` is the parsed all-atom representation. It is not fed unchanged to
-  every model.
-- v1 normalizes training views to **two partner groups**: a design group and a
-  context group. Each group may contain one or more chains.
-- Dataset provenance is preserved through `metadata`; it is not erased during
-  normalization.
+**Decoding:** Autoregressive with randomized decoding order. A causal mask
+ensures each position only attends to previously decoded neighbors. The final
+linear layer projects to 21 amino acid logits.
 
-### PartnerDesignView
+**Relative positional encoding:** For `max_relative_feature=32`, we one-hot
+encode 66 classes total: 65 clipped intra-chain offsets (`-32..32`) plus one
+inter-chain bucket at index 65. This fixes the input dimensionality of
+`embed_positional_features` and must remain stable for strict checkpoint
+compatibility.
 
-`PartnerDesignView` is derived from `InterfaceExample` and is the unit consumed
-by training and most evaluation code.
+### LigandMPNN (2.62M parameters)
 
-Required fields:
+Extends ProteinMPNN with a protein-ligand context encoder that operates over
+three graphs:
 
-| Field | Shape | Purpose |
-| --- | --- | --- |
-| `example` | object | Back-reference to the parent `InterfaceExample` |
-| `design_partner_group` | scalar | Which partner group is being designed |
-| `context_partner_group` | scalar | Which partner group is fixed context |
-| `designed_residue_mask` | `(L,)` | Residues predicted by the model |
-| `fixed_residue_mask` | `(L,)` | Complementary context residues |
-| `mask_for_loss` | `(L,)` | Valid residues contributing to the loss |
-| `interface_residue_mask` | `(L,)` | Interface subset for evaluation and optional weighting |
-| `view_metadata` | mapping | Direction (`A<-B` vs `B<-A`), source, crop info, etc. |
+```
+LigandMPNN (extends ProteinMPNN)
+├── [all ProteinMPNN modules]
+├── graph_featurization_module: ProteinFeaturesLigand  # replaces ProteinFeatures
+│   ├── [all ProteinFeatures modules]
+│   ├── embed_atom_type_features: Linear(atom_type_input → atom_type_output)
+│   ├── node_embedding: Linear(node_input → node_output)
+│   ├── node_norm: LayerNorm
+│   ├── ligand_subgraph_node_embedding: Linear(atom_type_input → node_output)
+│   ├── ligand_subgraph_node_norm: LayerNorm
+│   ├── ligand_subgraph_edge_embedding: Linear(num_rbf → node_output)
+│   ├── ligand_subgraph_edge_norm: LayerNorm
+│   └── [buffers: side_chain_atom_types, periodic_table_groups, periodic_table_periods]
+├── W_protein_to_ligand_edges_embed: Linear(node_features → hidden_dim)
+├── W_protein_encoding_embed: Linear(hidden_dim → hidden_dim)
+├── W_ligand_nodes_embed: Linear(hidden_dim → hidden_dim)
+├── W_ligand_edges_embed: Linear(hidden_dim → hidden_dim)
+├── W_final_context_embed: Linear(hidden_dim → hidden_dim, bias=False)
+├── final_context_norm: LayerNorm
+├── protein_ligand_context_encoder_layers: ModuleList[DecLayer × 2]
+└── ligand_context_encoder_layers: ModuleList[DecLayer × 2]
+```
 
-Default expansion policy:
+**Three graphs:**
 
-- Every eligible two-partner complex yields two views:
-  - design partner 0 conditioned on partner 1
-  - design partner 1 conditioned on partner 0
-- This is the default for both ProteinMPNN and LigandMPNN fine-tuning.
+1. **Protein backbone graph** — Same as ProteinMPNN but with k=32 (reduced from 48).
 
-## Model Batch Contracts
+2. **Protein-ligand graph** — For each residue, selects the 25 closest non-protein
+   atoms by virtual CB distance. Edge features: backbone-to-context RBF (80 dims)
+   + atom type embeddings (64 dims) + angle features (4 dims) = 148 dims →
+   projected to 128.
 
-`X` has one meaning throughout the project:
+3. **Intraligand graph** — Ligand atoms as nodes with element type + periodic table
+   group/period embeddings. Edges encode inter-atom RBF distances.
 
-- `X`: backbone-only coordinates with shape `(B, L, 4, 3)` in the order
-  `N, CA, C, O`
+**Context encoder:** 2 decoder-style layers process the intraligand graph, then
+2 layers process the protein-ligand graph. The resulting context representation
+is projected and added to protein node embeddings before the standard decoder.
 
-Parsed all-atom data remains available separately as `xyz_37` and
-`xyz_37_mask`.
+**Why LigandMPNN matters for PPI:**
 
-### ProteinMPNN Batch
+- **Side-chain atomization** — LigandMPNN can treat partner chain side-chain atoms
+  as explicit context, providing richer interface information than backbone-only.
+- **Glycan handling** — Viral glycoproteins carry glycan modifications that
+  ProteinMPNN cannot represent. LigandMPNN's unified non-protein atom framework
+  encodes glycans (and other post-translational modifications) natively via
+  element type embeddings.
+- **Metals and cofactors** — Interface-proximal metal ions and cofactors are
+  encoded through the same ligand context mechanism.
 
-Shared fields:
+## Weight Compatibility
 
-| Field | Shape |
-| --- | --- |
-| `X` | `(B, L, 4, 3)` |
-| `S` | `(B, L)` |
-| `R_idx` | `(B, L)` |
-| `chain_labels` | `(B, L)` |
-| `residue_mask` | `(B, L)` |
-| `designed_residue_mask` | `(B, L)` |
-| `fixed_residue_mask` | `(B, L)` |
-| `mask_for_loss` | `(B, L)` |
+### Loading pretrained weights
 
-ProteinMPNN never consumes the full 37-atom tensor directly.
+Our module hierarchy mirrors Foundry's exactly, so loading is:
 
-### LigandMPNN Batch
+```python
+checkpoint = torch.load(path, map_location="cpu", weights_only=True)
+model.load_state_dict(checkpoint["model"])
+```
 
-LigandMPNN uses the same shared fields plus:
+We also support Foundry's legacy checkpoint format (`model_state_dict` key)
+with the same key transformations Foundry implements:
 
-| Field | Shape |
-| --- | --- |
-| `xyz_37` | `(B, L, 37, 3)` |
-| `xyz_37_mask` | `(B, L, 37)` |
-| `Y` | `(B, N, 3)` |
-| `Y_m` | `(B, N)` |
-| `Y_t` | `(B, N)` |
-| `atomize_side_chains` | scalar or `(B,)` |
-| `hide_side_chain_mask` | `(B, L)` |
+- **Token reordering:** Legacy uses 1-letter alphabetical (A, C, D, E, ...);
+  current uses 3-letter alphabetical (Ala, Arg, Asn, Asp, ...). Affects `W_s`
+  and `W_out`.
+- **RBF pair reordering:** Legacy groups by same-atom pairs first; current uses
+  outer-product order. Affects `edge_embedding`.
+- **Atom type vocabulary:** Legacy has 120 types; current has 119 (drops unused
+  index). Affects LigandMPNN embeddings.
 
-For PPI fine-tuning, `Y / Y_m / Y_t` are built from:
+### Exporting fine-tuned weights
 
-- real non-protein atoms already present in the structure
-- fixed-partner side-chain atoms exposed through the existing LigandMPNN context
-  pathway
-
-Designed-partner side chains are not exposed as context during training.
-
-## Model Families
-
-### ProteinMPNN Core
-
-The ProteinMPNN core is a checkpoint-compatible reimplementation of the
-reference architecture:
-
-- same high-level module tree where state-dict portability depends on it
-- same hidden size, encoder depth, decoder depth, and edge-feature layout as
-  the reference weights
-- same token ordering and output projection ordering as the current Foundry
-  MPNN implementation
-
-Backbone featurization:
-
-- Use atoms `N, CA, C, O` plus a virtual `CB` computed from backbone geometry.
-- Build the k-nearest-neighbor graph from `CA-CA` distances.
-- Use 25 ordered backbone/virtual-atom pairs for radial basis features.
-
-Positional encoding:
-
-- Clip residue offsets to `[-32, 32]`
-- One-hot encode `65` offset bins plus `1` inter-chain bucket
-- Total classes: `66`
-- Inter-chain bucket index: `65`
-
-### LigandMPNN Core
-
-LigandMPNN preserves the existing ligand-context architecture rather than
-introducing a new partner encoder.
-
-Implications:
-
-- The backbone encoder remains checkpoint-compatible with the reference design.
-- Protein-partner atomic context is injected through the existing
-  protein-to-context and context-subgraph pathway.
-- This keeps pretrained-weight import and Foundry export tractable.
-
-LigandMPNN context for PPI fine-tuning:
-
-- Fixed-partner side-chain atoms are surfaced as context atoms.
-- Real hetero atoms remain in the same context pool.
-- The model still uses the reference-style context encoder rather than a new
-  PPI-specific module.
-
-## Weight Compatibility And Checkpoints
-
-### Compatibility Boundary
-
-Portability depends on:
-
-- parameter and buffer names
-- token order
-- radial-basis atom-pair order
-- atom-type vocabulary conventions
-- positional-encoding configuration
-
-The architecture therefore mirrors the reference implementation only where
-those boundaries matter. teddyMPNN does **not** mirror Foundry's full runtime,
-data pipeline, or CLI.
-
-### Canonical Artifact: `CheckpointBundle`
-
-teddyMPNN stores training state in a native bundle:
+The canonical training artifact is a teddyMPNN-native checkpoint bundle that
+stores the model state alongside the compatibility metadata needed to safely
+re-export into other ecosystems:
 
 ```python
 {
     "format_version": "teddympnn.v1",
     "model_family": "protein_mpnn" | "ligand_mpnn",
-    "model_config": {...},
-    "training_config": {...},
-    "state_dict": {...},
-    "optimizer_state": {...} | None,
-    "scheduler_state": {...} | None,
-    "step": int,
+    "state_dict": model.state_dict(),
+    "optimizer": optimizer.state_dict(),
+    "scheduler": scheduler.state_dict(),
+    "step": global_step,
+    "config": config.model_dump(),
     "metrics": {...},
     "compatibility": {
-        "token_order": [...],
-        "legacy_token_order": [...],
-        "rbf_pair_order": [...],
-        "atom_type_vocab_size": int,
-        "positional_max_relative_feature": 32,
-        "positional_num_classes": 66,
+        "token_order": "foundry_current",
+        "rbf_pair_order": "foundry_current",
+        "atom_type_vocabulary": "foundry_current",
+        "positional_encoding_classes": 66,
     },
 }
 ```
 
-This is the canonical artifact for:
+Foundry-compatible checkpoints are exported explicitly from this bundle, and a
+`convert_to_legacy` utility is provided for users of the original
+dauparas/ProteinMPNN and dauparas/LigandMPNN repos (reverse token/RBF/atom
+reordering).
 
-- checkpoint resume
-- provenance
-- reproducibility
-- future format evolution
+## Training Datasets
 
-### Import And Export Adapters
+### 1. Teddymer — Synthetic dimers from AFDB domain pairs
 
-Supported compatibility paths:
+**Source:** ~510K quality-filtered cluster representatives of synthetic
+protein-protein dimers, constructed by splitting multi-domain AFDB monomers at
+CATH domain boundaries.
 
-- import current Foundry-style checkpoints
-- import original legacy ProteinMPNN and LigandMPNN checkpoints
-- export Foundry-current strict-loadable checkpoints
-- export legacy-format checkpoints when feasible
+**Filtering criteria (from original paper):**
+- Interface pLDDT > 70
+- Interface PAE (ipAE) < 10
+- Interface length > 10 residues
 
-Foundry compatibility remains a first-class requirement, but Foundry-format
-checkpoints are **export targets**, not the internal training artifact.
+**Data acquisition pipeline:**
 
-## Dataset Adapters And Mixing
+```
+┌──────────────────────────────────────────────────────────────┐
+│  1. Download domain boundary table from Zenodo               │
+│     (ted_100_324m.domain_summary.cath.globularity.taxid.tsv) │
+├──────────────────────────────────────────────────────────────┤
+│  2. Download teddymer cluster/metadata from                  │
+│     teddymer.steineggerlab.workers.dev/foldseek/teddymer.tar │
+├──────────────────────────────────────────────────────────────┤
+│  3. Parse cluster.tsv + nonsingletonrep_metadata.tsv         │
+│     → extract UniProt IDs and domain boundaries              │
+├──────────────────────────────────────────────────────────────┤
+│  4. Download full-chain PDBs from AFDB                       │
+│     (~500K unique chains via HTTPS at ~35ms/req)             │
+├──────────────────────────────────────────────────────────────┤
+│  5. Chop domains locally using pdb-tools pdb_selres          │
+│     (instantaneous per file)                                 │
+├──────────────────────────────────────────────────────────────┤
+│  6. Assemble dimers: relabel chains (A/B), concatenate,      │
+│     write combined PDB                                       │
+└──────────────────────────────────────────────────────────────┘
+```
 
-### teddymer Adapter
+**Estimated cost:** ~500K AFDB downloads (~125 GB), ~1M domain chops, ~500K
+dimer assemblies. With 50 concurrent workers: ~1 hour total.
 
-Responsibilities:
+**Why not the TED API directly:** The TED API generates domain PDBs on-the-fly
+by downloading from AFDB and chopping — replicating that locally avoids
+hammering both servers and is faster in aggregate.
 
-- parse source metadata and domain boundaries
-- assemble normalized two-partner examples
-- preserve source-specific quality metadata and cluster annotations
+### 2. NVIDIA/EMBL-EBI predicted complexes
 
-### NVIDIA Complex Adapter
+**Source:** ~1.8M high-confidence predicted protein complexes (AlphaFold-Multimer)
+from 4,777 proteomes, filtered from ~31M total predictions.
 
-Responsibilities:
+**Filtering criteria (from original paper):**
+- ipSAEmin >= 0.6
+- pLDDTavg >= 70
+- Backbone clashes <= 10
 
-- filter metadata using confidence thresholds
-- map passing examples to chunk archives
-- normalize extracted structures into `InterfaceExample`
+**Data acquisition pipeline:**
 
-Practical note:
+```
+┌────────────────────────────────────────────────────────────────┐
+│  1. Download model_entity_metadata_mapping.csv (4.3 GB)        │
+├────────────────────────────────────────────────────────────────┤
+│  2. Filter rows by confidence thresholds                       │
+│     → identify which chunk tarballs contain passing structures │
+├────────────────────────────────────────────────────────────────┤
+│  3. Download only the required chunk_NNNN.tar files            │
+│     (each ~7.5 GB, zstd-compressed contents)                  │
+├────────────────────────────────────────────────────────────────┤
+│  4. Extract + decompress (zstd) passing structures only        │
+│     → mmCIF files                                              │
+├────────────────────────────────────────────────────────────────┤
+│  5. Parse mmCIF → extract backbone + side-chain coordinates,   │
+│     chain labels, confidence scores                            │
+└────────────────────────────────────────────────────────────────┘
+```
 
-- The metadata filter may still touch a large fraction of archives.
-- Chunk-coverage profiling is part of data preparation, not an afterthought.
+**Scale consideration:** Even after filtering to ~1.8M structures, the data
+spans most of the 4,000 chunk tarballs (~30 TB total). A secondary filtering
+step (e.g., ipSAEmin >= 0.8 for "very high confidence" only, yielding ~970K
+structures) may be needed to keep download volume practical. We should profile
+chunk coverage after the metadata filter to decide.
 
-### PDB Complex Adapter
+### 3. PDB experimental complexes (supplementary)
 
-Responsibilities:
+We also support loading experimental multi-chain structures from the PDB,
+following Foundry's existing filters:
 
-- curate experimental multi-chain complexes
-- normalize them into the same contract as predicted-structure datasets
+- Resolution < 3.5 A
+- Method: X-ray diffraction or cryo-EM (no NMR)
+- At least 2 protein chains with interface contacts
 
-### Mixing Strategy
+This provides high-quality ground truth to mix with the predicted-structure
+datasets. The original teddymer paper used an 8:2 teddymer:PDB mixing ratio.
 
-- Adapters remain source-specific.
-- Training consumes a configurable mixture of normalized examples.
-- Dataset provenance is preserved for sampling, evaluation, and ablations.
+### Data mixing
+
+Training data is sampled from a configurable mixture of datasets:
+
+```yaml
+# Example config
+data:
+  sources:
+    - name: teddymer
+      weight: 0.6
+      path: /data/teddymer/dimers/
+    - name: nvidia_complexes
+      weight: 0.2
+      path: /data/nvidia/filtered/
+    - name: pdb_complexes
+      weight: 0.2
+      path: /data/pdb/complexes/
+  token_budget: 10000     # max residues per batch
+  max_residues: 6000      # max residues per structure
+  min_interface_contacts: 4
+```
+
+### Training view generation
+
+Each two-partner complex is expanded into two partner-design training views by
+default:
+
+- Design partner A while conditioning on partner B
+- Design partner B while conditioning on partner A
+
+At the batch level, `designed_residue_mask` marks exactly one partner group,
+while `fixed_residue_mask` marks the complementary conditioning partner. This
+keeps the training objective aligned with binder/interface design rather than
+joint all-residue redesign of the full complex.
+
+## Feature Computation
+
+Both models consume the same core feature dictionary, with LigandMPNN adding
+ligand-specific fields:
+
+### Shared features (ProteinMPNN + LigandMPNN)
+
+| Feature | Shape | Description |
+|---------|-------|-------------|
+| `xyz_37` | `(B, L, 37, 3)` | Parsed all-atom residue coordinates |
+| `xyz_37_m` | `(B, L, 37)` | Parsed all-atom validity mask |
+| `X` | `(B, L, 4, 3)` | Backbone-only coordinates (N, CA, C, O) derived from `xyz_37` |
+| `X_m` | `(B, L, 4)` | Backbone-only atom validity mask |
+| `S` | `(B, L)` | Amino acid token indices |
+| `R_idx` | `(B, L)` | Residue indices (per-chain) |
+| `chain_labels` | `(B, L)` | Numeric chain identifiers |
+| `residue_mask` | `(B, L)` | Residue validity mask |
+| `designed_residue_mask` | `(B, L)` | Which residues to predict (1=design) |
+| `fixed_residue_mask` | `(B, L)` | Complementary partner used as conditioning context |
+
+### LigandMPNN additional features
+
+| Feature | Shape | Description |
+|---------|-------|-------------|
+| `Y` | `(B, N, 3)` | Non-protein atom coordinates |
+| `Y_m` | `(B, N)` | Non-protein atom mask |
+| `Y_t` | `(B, N)` | Atom types (element indices) |
+
+For PPI fine-tuning with LigandMPNN, `Y/Y_m/Y_t` include:
+- Fixed-partner side-chain atoms (via side-chain atomization from `xyz_37`)
+- Glycans, metals, cofactors, and other non-protein atoms present in the structure
+
+Designed-partner side-chain atoms are not exposed through `Y`, so the model
+conditions on the partner context without leaking the target residue identities
+it is being trained to predict.
+
+### Collation
+
+Variable-length structures are batched in two stages:
+
+1. A **token-budget batch sampler** groups dataset indices until the total
+   residue count reaches the token budget (default: 10,000 for ProteinMPNN,
+   6,000 for LigandMPNN).
+2. A padding collator receives that pre-grouped batch and pads tensors to the
+   longest structure in the batch.
+
+This keeps the batching design implementable with standard `DataLoader`
+semantics while still handling the wide length distribution efficiently.
 
 ## Training Pipeline
 
-### Default Objective
+### Overview
 
-The default fine-tuning objective is **bidirectional partner design**.
+```
+┌─────────────────┐     ┌──────────────────────┐     ┌──────────────────┐
+│ Load pretrained  │────▶│ Fine-tune on PPI data │────▶│ Export checkpoint │
+│ weights          │     │                      │     │ (Foundry-compat)  │
+└─────────────────┘     └──────────────────────┘     └──────────────────┘
+```
 
-For each `InterfaceExample`:
+Full-model fine-tuning from pretrained ProteinMPNN or LigandMPNN checkpoints.
+No frozen layers, no adapter heads, no LoRA — the models are small enough
+(1.66M / 2.62M params) to fine-tune entirely.
 
-1. Build a view that designs partner group A while fixing partner group B.
-2. Build a second view that designs partner group B while fixing partner group A.
-
-This objective applies to both model families.
+The default training unit is a partner-design view rather than an all-residue
+full-complex redesign. Each complex contributes one view per design direction,
+with one partner masked for prediction and the other exposed as fixed context.
 
 ### Loss
 
-Primary loss: label-smoothed negative log-likelihood over designed positions.
+**Primary:** Label-smoothed negative log-likelihood on amino acid prediction:
 
-```text
-numerator   = sum(mask_for_loss * per_position_nll)
-denominator = sum(mask_for_loss)
-loss        = numerator / max(denominator, 1)
+```
+L = -(1/|M|) * sum_{i in M} [ (1-eps) * log p(s_i | X, s_{<i}) + eps/K * sum_k log p(k | X, s_{<i}) ]
 ```
 
-Distributed training uses global numerator and denominator reduction before the
-final division so the loss is invariant to padding, token budget, and replica
-layout.
+where M is the set of designed residue positions, eps=0.1 is the label smoothing
+factor, and K=21 is the vocabulary size. In implementation, we accumulate the
+masked numerator and masked denominator separately and divide after reduction,
+so the loss scale is the mean over designed positions even under variable
+token-budget batches and DDP.
 
-### Optimization
+**Future extensions** (not in initial implementation):
+- Interface residue upweighting (higher loss weight for positions within 8A of
+  partner chain)
+- Auxiliary contact prediction loss
+- ddG-aware loss (MSE between predicted and experimental ddG, as in StaB-ddG)
 
-- Optimizer: Adam with reference-style hyperparameters
-- Scheduler: Noam warmup + inverse-square-root decay
-- Structure noise defaults follow the upstream pretrained families
-- Full-model fine-tuning is the default; no LoRA or adapter heads in v1
+### Optimizer and scheduler
 
-### Batch Construction
+- **Optimizer:** Adam (beta1=0.9, beta2=0.98, epsilon=1e-9)
+- **Scheduler:** Noam (warmup + inverse square root decay)
+  - `lr(step) = factor * d_model^(-0.5) * min(step^(-0.5), step * warmup^(-1.5))`
+  - Default: `factor=2`, `warmup_steps=4000`
+- **Gradient clipping:** None for ProteinMPNN, `max_norm=1.0` for LigandMPNN
 
-Batching is split into two layers:
+### Data augmentation
 
-- `TokenBudgetBatchSampler`: groups example indices under a residue/token budget
-- padding collator: stacks and pads already chosen batches
+- **Coordinate noise:** Gaussian noise added to backbone coordinates during
+  training. Default: 0.20 A (ProteinMPNN), 0.10 A (LigandMPNN).
+- **Random decoding order:** Inherent to the autoregressive formulation — each
+  training step uses a different random permutation.
 
-The collator does **not** decide batch membership.
+### Training configuration
+
+```python
+@dataclass
+class TrainingConfig:
+    # Model
+    model_type: Literal["protein_mpnn", "ligand_mpnn"]
+    pretrained_weights: Path
+
+    # Data
+    data_sources: list[DataSourceConfig]
+    token_budget: int = 10_000
+    max_residues: int = 6_000
+    min_interface_contacts: int = 4
+
+    # Optimization
+    learning_rate_factor: float = 2.0
+    warmup_steps: int = 4_000
+    max_steps: int = 300_000
+    grad_clip_max_norm: float | None = None
+
+    # Augmentation
+    structure_noise: float = 0.2
+    label_smoothing: float = 0.1
+
+    # Infrastructure
+    mixed_precision: bool = True          # bf16 on Ampere+/Blackwell
+    gradient_checkpointing: bool = True
+    num_workers: int = 8
+    seed: int = 42
+
+    # Logging
+    log_every_n_steps: int = 100
+    eval_every_n_steps: int = 5_000
+    save_every_n_steps: int = 10_000
+```
+
+### Checkpointing
+
+Each training checkpoint saves a teddyMPNN-native bundle:
+
+```python
+{
+    "format_version": "teddympnn.v1",
+    "model_family": "protein_mpnn" | "ligand_mpnn",
+    "state_dict": model.state_dict(),
+    "optimizer": optimizer.state_dict(),
+    "scheduler": scheduler.state_dict(),
+    "step": global_step,
+    "config": config.model_dump(),
+    "metrics": {"nll": ..., "seq_recovery": ..., ...},
+    "compatibility": {
+        "token_order": "foundry_current",
+        "rbf_pair_order": "foundry_current",
+        "atom_type_vocabulary": "foundry_current",
+        "positional_encoding_classes": 66,
+    },
+}
+```
+
+Foundry-compatible checkpoints are exported explicitly from this bundle rather
+than used as the primary on-disk training format.
 
 ## Evaluation
 
-### Sequence Recovery
+### 1. Interface sequence recovery
 
-Primary evaluation:
+For each structure in the test set:
+- Fix all positions outside the interface (within 8A CB-CB of the partner chain)
+- Predict sequences at interface positions using teacher forcing
+- Compute per-residue accuracy (argmax vs. ground truth)
+- Report macro-averaged (per-structure) and micro-averaged (per-residue) recovery
 
-- overall recovery on designed residues
-- interface-only recovery on designed interface residues
-- metrics stratified by source and structure properties
+We report both overall recovery and interface-only recovery, stratified by:
+- Dataset source (teddymer, NVIDIA, PDB)
+- Interface size (small/medium/large)
+- CATH classification (for teddymer)
 
-### ddG As Downstream Evaluation
+### 2. Binding affinity prediction (ddG)
 
-ddG prediction is a downstream scoring application built on the sequence model.
-It remains part of the evaluation stack, but it is not a core v1 training
-objective.
+Following the thermodynamic decomposition from StaB-ddG and BA-DDG:
+
+```
+ddG(s_wt → s_mut) ≈ [log p(s_mut | X_AB) - log p(s_mut | X_A) - log p(s_mut | X_B)]
+                    - [log p(s_wt  | X_AB) - log p(s_wt  | X_A) - log p(s_wt  | X_B)]
+```
+
+This requires **6 forward passes** per mutation: scoring wild-type and mutant
+sequences each on the complex structure (X_AB), chain A alone (X_A), and chain B
+alone (X_B).
+
+**Variance reduction:**
+- **Antithetic variates:** Use identical random decoding orders and backbone noise
+  for wild-type and mutant scoring within each sample.
+- **Monte Carlo averaging:** Average over M=20 independent samples of decoding
+  order and noise.
+
+**Benchmark:** SKEMPI v2.0 (7,085 binding ddG measurements across 345 complexes).
+Metrics: per-structure Spearman correlation, overall Spearman/Pearson, RMSE.
+
+**Optional supervised fine-tuning for ddG** (future work):
+- Stage 1: Fine-tune on Megascale folding stability data (~776K measurements)
+- Stage 2: Fine-tune on SKEMPI v2.0 binding ddG data
+- KL divergence penalty against the pretrained model to prevent catastrophic
+  forgetting (as in BA-DDG)
+
+### Evaluation API
+
+```python
+from teddympnn.evaluation import score_complex, predict_ddg
+
+# Score a complex (log-likelihood per residue)
+scores = score_complex(
+    model,
+    structure_path="complex.pdb",
+    designed_chains=["B"],
+    num_samples=20,
+)
+
+# Predict ddG for a mutation
+ddg = predict_ddg(
+    model,
+    structure_path="complex.pdb",
+    mutations={"B": {"A45G": None, "L52W": None}},
+    num_samples=20,
+)
+```
 
 ## Package Structure
 
-```text
+```
 src/teddympnn/
-├── cli.py
-├── config.py
+├── __init__.py
+├── cli.py                          # Typer CLI (train, evaluate, score, download)
+├── config.py                       # Pydantic config models
+│
 ├── models/
-│   ├── protein_mpnn.py
-│   ├── ligand_mpnn.py
-│   ├── tokens.py
+│   ├── __init__.py
+│   ├── protein_mpnn.py             # ProteinMPNN nn.Module
+│   ├── ligand_mpnn.py              # LigandMPNN nn.Module (extends ProteinMPNN)
 │   └── layers/
+│       ├── __init__.py
+│       ├── message_passing.py      # EncLayer, DecLayer
+│       ├── graph_embeddings.py     # ProteinFeatures, ProteinFeaturesLigand
+│       ├── positional_encoding.py  # PositionalEncodings
+│       └── feed_forward.py         # PositionWiseFeedForward
+│
 ├── data/
-│   ├── contracts.py
-│   ├── features.py
-│   ├── views.py
-│   ├── dataset.py
-│   ├── sampler.py
-│   ├── collator.py
-│   ├── teddymer.py
-│   ├── nvidia_complexes.py
-│   └── pdb_complexes.py
+│   ├── __init__.py
+│   ├── dataset.py                  # PPIDataset (unified torch Dataset)
+│   ├── sampler.py                  # Token-budget batch sampler
+│   ├── collator.py                 # Padding collator for pre-grouped batches
+│   ├── features.py                 # Feature computation from PDB/mmCIF
+│   ├── teddymer.py                 # Teddymer download + preprocessing
+│   ├── nvidia_complexes.py         # NVIDIA complexes download + filtering
+│   └── pdb_complexes.py            # PDB experimental complexes
+│
 ├── training/
-│   ├── loss.py
-│   ├── scheduler.py
-│   └── trainer.py
+│   ├── __init__.py
+│   ├── trainer.py                  # Training loop (supports DDP)
+│   ├── loss.py                     # LabelSmoothedNLLLoss
+│   └── scheduler.py                # NoamScheduler
+│
 ├── evaluation/
-│   ├── sequence_recovery.py
-│   ├── binding_affinity.py
-│   └── skempi.py
+│   ├── __init__.py
+│   ├── sequence_recovery.py        # Interface sequence recovery metrics
+│   ├── binding_affinity.py         # ddG prediction (StaB/BA-DDG approach)
+│   └── skempi.py                   # SKEMPI v2.0 benchmark utilities
+│
 └── weights/
-    ├── io.py
-    ├── foundry.py
-    └── legacy.py
+    ├── __init__.py
+    ├── io.py                       # Native checkpoint bundle I/O
+    ├── foundry.py                  # Foundry import/export
+    └── legacy.py                   # Legacy ↔ current weight conversion
 ```
 
-## CLI Surface
-
-Representative commands:
+### CLI
 
 ```bash
-teddympnn train --config configs/protein_mpnn_ppi.yaml
-teddympnn evaluate recovery --checkpoint outputs/run.ckpt --data data/test/
-teddympnn evaluate ddg --checkpoint outputs/run.ckpt --skempi data/skempi/
-teddympnn checkpoints export-foundry --checkpoint outputs/run.ckpt --output foundry.pt
-teddympnn checkpoints import-legacy --model protein_mpnn --input proteinmpnn_v_48_020.pt --output init.ckpt
+# Download and prepare datasets
+teddympnn download teddymer --output /data/teddymer/ --workers 50
+teddympnn download nvidia-complexes --output /data/nvidia/ --min-ipsae 0.6
+teddympnn download pretrained --model ligand_mpnn --output /weights/
+teddympnn checkpoints export-foundry --checkpoint /weights/run.ckpt --output /weights/foundry.pt
+
+# Train
+teddympnn train --config configs/ligand_mpnn_ppi.yaml
+
+# Evaluate
+teddympnn evaluate recovery --checkpoint /weights/teddympnn_ligand.pt --data /data/test/
+teddympnn evaluate ddg --checkpoint /weights/teddympnn_ligand.pt --skempi /data/skempi/
+
+# Score a structure
+teddympnn score --checkpoint /weights/teddympnn_ligand.pt --pdb complex.pdb --chains B
 ```
 
 ## Dependencies
 
-Core runtime:
+```toml
+[project]
+dependencies = [
+    "torch>=2.1",
+    "pydantic>=2.0",
+    "typer>=0.9",
+    "rich>=13.0",
+    "biopython>=1.80",
+    "pdb-tools>=2.5",
+    "numpy>=1.24",
+    "pandas>=2.0",
+    "pyyaml>=6.0",
+]
 
-- `torch`
-- `pydantic`
-- `typer`
-- `rich`
-- `numpy`
-- `pandas`
-- `pyyaml`
-- `biopython`
-- `aiohttp`
-- `zstandard`
+[project.optional-dependencies]
+train = [
+    "wandb>=0.15",
+    "lightning>=2.0",        # for DDP / multi-GPU
+]
+```
 
-Optional:
+## Implementation Order
 
-- `wandb`
+### Phase 1: Model + weights (foundation)
+
+1. Implement `layers/` — message passing, graph embeddings, positional encoding,
+   feed forward. These are the leaf modules and can be unit-tested against
+   Foundry reference outputs.
+2. Implement `ProteinMPNN` and `LigandMPNN` modules, composing the layers.
+3. Implement weight I/O (`weights/io.py`, `weights/foundry.py`,
+   `weights/legacy.py`). Verify round-trip: load Foundry checkpoint → our model
+   → save native bundle → export Foundry checkpoint → reload in Foundry.
+4. **Validation gate:** Run Foundry's inference examples through our model, verify
+   identical outputs (within fp32 tolerance).
+
+### Phase 2: Data pipeline
+
+5. Implement teddymer download/preprocessing pipeline.
+6. Implement NVIDIA complexes metadata filtering + selective download.
+7. Implement unified `PPIDataset`, partner-design view expansion, and
+   token-budget batching (`sampler.py` + `collator.py`).
+8. Implement feature computation (PDB/mmCIF → feature tensors).
+
+### Phase 3: Training
+
+9. Implement `LabelSmoothedNLLLoss`, `NoamScheduler`.
+10. Implement `Trainer` with mixed precision, gradient checkpointing, DDP.
+11. Training config + CLI integration.
+12. **Validation gate:** End-to-end training run on small subset, verify loss
+    decreases and recovery improves.
+
+### Phase 4: Evaluation
+
+13. Implement interface sequence recovery metrics.
+14. Implement ddG prediction (6-pass scoring + antithetic variates).
+15. Implement SKEMPI v2.0 benchmark.
+16. CLI integration for evaluation commands.
+
+### Phase 5: Polish + scale
+
+17. Full training runs on teddymer + NVIDIA + PDB mixture.
+18. Hyperparameter tuning.
+19. Benchmark against vanilla ProteinMPNN/LigandMPNN on interface recovery +
+    SKEMPI ddG.
+20. Documentation, examples, and release.
