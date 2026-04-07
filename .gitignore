@@ -182,3 +182,9 @@ cython_debug/
 
 # macOS
 .DS_Store
+
+# Foundry equivalence test reference data (large binary files)
+tests/validation/reference_data/*.pt
+tests/validation/reference_data/weights/
+tests/validation/reference_data/structures/
+tests/validation/reference_data/generate_foundry_reference.py
