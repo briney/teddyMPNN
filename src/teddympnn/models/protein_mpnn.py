@@ -109,7 +109,7 @@ class ProteinMPNN(nn.Module):
 
         Override this in LigandMPNN to pass additional arguments.
         """
-        return self.graph_featurization_module(
+        return self.graph_featurization_module(  # type: ignore[no-any-return]
             X=input_features["X"],
             residue_mask=input_features["residue_mask"],
             R_idx=input_features["R_idx"],
@@ -391,7 +391,7 @@ class ProteinMPNN(nn.Module):
 
             # Sample at the current decoding position
             for b in range(B):
-                p = pos[b].item()
+                p = int(pos[b].item())
                 if designed_mask[b, p]:
                     probs = torch.exp(log_probs[b, p])
                     S_sample[b, p] = torch.multinomial(probs, 1).squeeze(-1)

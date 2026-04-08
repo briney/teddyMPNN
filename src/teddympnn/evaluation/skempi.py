@@ -12,7 +12,7 @@ import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import torch
@@ -88,7 +88,7 @@ class SKEMPIResults:
 # ---------------------------------------------------------------------------
 
 
-def _rankdata(x: np.ndarray) -> np.ndarray:
+def _rankdata(x: np.ndarray[Any, Any]) -> np.ndarray[Any, Any]:
     """Rank data with averaged ties."""
     n = len(x)
     sorter = np.argsort(x, kind="stable")
@@ -109,7 +109,7 @@ def _rankdata(x: np.ndarray) -> np.ndarray:
     return ranks
 
 
-def pearson_correlation(x: np.ndarray, y: np.ndarray) -> float:
+def pearson_correlation(x: np.ndarray[Any, Any], y: np.ndarray[Any, Any]) -> float:
     """Pearson correlation coefficient."""
     if len(x) < 2:
         return float("nan")
@@ -121,14 +121,14 @@ def pearson_correlation(x: np.ndarray, y: np.ndarray) -> float:
     return float((xc * yc).sum() / denom)
 
 
-def spearman_correlation(x: np.ndarray, y: np.ndarray) -> float:
+def spearman_correlation(x: np.ndarray[Any, Any], y: np.ndarray[Any, Any]) -> float:
     """Spearman rank correlation."""
     if len(x) < 2:
         return float("nan")
     return pearson_correlation(_rankdata(x), _rankdata(y))
 
 
-def auroc(y_true: np.ndarray, y_scores: np.ndarray) -> float:
+def auroc(y_true: np.ndarray[Any, Any], y_scores: np.ndarray[Any, Any]) -> float:
     """Area under the ROC curve via Mann-Whitney U statistic.
 
     Args:

@@ -93,7 +93,7 @@ class Trainer:
         self.use_amp = config.mixed_precision and self.device.type == "cuda"
         self.amp_dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
         use_scaler = self.use_amp and self.amp_dtype == torch.float16
-        self.scaler = torch.amp.GradScaler("cuda", enabled=use_scaler)
+        self.scaler = torch.amp.GradScaler("cuda", enabled=use_scaler)  # type: ignore[attr-defined]
 
         # Data loaders
         self.train_loader = train_loader
@@ -162,7 +162,7 @@ class Trainer:
         return cls(
             config=config,
             model=model,
-            train_loader=train_loader,
+            train_loader=train_loader,  # type: ignore[arg-type]
         )
 
     def _init_wandb(self) -> None:
@@ -207,7 +207,7 @@ class Trainer:
         self.model.train()
         batch = self._move_batch(batch)
 
-        with torch.amp.autocast("cuda", dtype=self.amp_dtype, enabled=self.use_amp):
+        with torch.amp.autocast("cuda", dtype=self.amp_dtype, enabled=self.use_amp):  # type: ignore[attr-defined]
             output = self.model(batch)
             loss = self.loss_fn(
                 output["log_probs"],
@@ -226,7 +226,7 @@ class Trainer:
         self.scheduler.step()
         self.optimizer.zero_grad()
 
-        return loss.item()
+        return float(loss.item())
 
     @torch.no_grad()
     def validate(self) -> dict[str, float]:
@@ -249,7 +249,7 @@ class Trainer:
         for batch in self.val_loader:
             batch = self._move_batch(batch)
 
-            with torch.amp.autocast("cuda", dtype=self.amp_dtype, enabled=self.use_amp):
+            with torch.amp.autocast("cuda", dtype=self.amp_dtype, enabled=self.use_amp):  # type: ignore[attr-defined]
                 output = self.model(batch)
                 loss = self.loss_fn(
                     output["log_probs"],

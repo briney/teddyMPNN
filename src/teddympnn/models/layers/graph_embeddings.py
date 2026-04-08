@@ -353,10 +353,10 @@ class ProteinFeaturesLigand(ProteinFeatures):
             atom_types.clamp(0, NUM_ELEMENT_TYPES - 1), num_classes=NUM_ELEMENT_TYPES
         ).float()
         # Periodic table group: (..., 19)
-        groups = self.periodic_table_groups[atom_types.clamp(0, NUM_ELEMENT_TYPES - 1)]
+        groups = self.periodic_table_groups[atom_types.clamp(0, NUM_ELEMENT_TYPES - 1)]  # type: ignore[index]
         group_onehot = F.one_hot(groups, num_classes=NUM_PERIODIC_GROUPS).float()
         # Periodic table period: (..., 8)
-        periods = self.periodic_table_periods[atom_types.clamp(0, NUM_ELEMENT_TYPES - 1)]
+        periods = self.periodic_table_periods[atom_types.clamp(0, NUM_ELEMENT_TYPES - 1)]  # type: ignore[index]
         period_onehot = F.one_hot(periods, num_classes=NUM_PERIODIC_PERIODS).float()
         # Concatenate: (..., 146)
         return torch.cat([elem_onehot, group_onehot, period_onehot], dim=-1)

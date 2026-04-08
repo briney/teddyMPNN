@@ -135,7 +135,7 @@ def load_checkpoint_bundle(
         scheduler.load_state_dict(bundle["scheduler"])
         logger.info("Restored scheduler state")
 
-    return bundle
+    return dict(bundle)
 
 
 def download_pretrained(

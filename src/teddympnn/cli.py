@@ -142,7 +142,7 @@ def pretrained(
 
 @app.command()
 def train(
-    config: Annotated[Path, typer.Option(help="Path to training config YAML.")] = ...,
+    config: Annotated[Path, typer.Option(help="Path to training config YAML.")] = ...,  # type: ignore[assignment]
     resume: Annotated[Path | None, typer.Option(help="Checkpoint to resume from.")] = None,
 ) -> None:
     """Train a teddyMPNN model from a YAML config."""
@@ -166,8 +166,8 @@ def train(
 
 @checkpoints_app.command("export-foundry")
 def export_foundry(
-    checkpoint: Annotated[Path, typer.Option(help="teddyMPNN checkpoint path.")] = ...,
-    output: Annotated[Path, typer.Option(help="Output Foundry checkpoint path.")] = ...,
+    checkpoint: Annotated[Path, typer.Option(help="teddyMPNN checkpoint path.")] = ...,  # type: ignore[assignment]
+    output: Annotated[Path, typer.Option(help="Output Foundry checkpoint path.")] = ...,  # type: ignore[assignment]
     model_type: Annotated[
         str, typer.Option(help="Model type: protein_mpnn or ligand_mpnn.")
     ] = "protein_mpnn",
@@ -193,8 +193,8 @@ def export_foundry(
 
 @evaluate_app.command()
 def recovery(
-    checkpoint: Annotated[Path, typer.Option(help="Model checkpoint path.")] = ...,
-    data: Annotated[Path, typer.Option(help="Test data manifest path.")] = ...,
+    checkpoint: Annotated[Path, typer.Option(help="Model checkpoint path.")] = ...,  # type: ignore[assignment]
+    data: Annotated[Path, typer.Option(help="Test data manifest path.")] = ...,  # type: ignore[assignment]
     model_type: Annotated[
         str, typer.Option(help="Model type: protein_mpnn or ligand_mpnn.")
     ] = "protein_mpnn",
@@ -245,7 +245,7 @@ def recovery(
 
 @evaluate_app.command()
 def benchmark(
-    config: Annotated[Path, typer.Option(help="Benchmark config YAML.")] = ...,
+    config: Annotated[Path, typer.Option(help="Benchmark config YAML.")] = ...,  # type: ignore[assignment]
     output: Annotated[Path | None, typer.Option(help="Output JSON report path.")] = None,
 ) -> None:
     """Run benchmarks across multiple models and print comparison tables.
@@ -303,8 +303,8 @@ def benchmark(
 
 @evaluate_app.command()
 def ddg(
-    checkpoint: Annotated[Path, typer.Option(help="Model checkpoint path.")] = ...,
-    skempi: Annotated[Path, typer.Option(help="SKEMPI data directory.")] = ...,
+    checkpoint: Annotated[Path, typer.Option(help="Model checkpoint path.")] = ...,  # type: ignore[assignment]
+    skempi: Annotated[Path, typer.Option(help="SKEMPI data directory.")] = ...,  # type: ignore[assignment]
     num_samples: Annotated[int, typer.Option(help="Monte Carlo samples.")] = 20,
     model_type: Annotated[
         str, typer.Option(help="Model type: protein_mpnn or ligand_mpnn.")
@@ -353,9 +353,9 @@ def ddg(
 
 @app.command()
 def score(
-    checkpoint: Annotated[Path, typer.Option(help="Model checkpoint path.")] = ...,
-    pdb: Annotated[Path, typer.Option(help="PDB/mmCIF structure file.")] = ...,
-    chains: Annotated[str, typer.Option(help="Design chain IDs (comma-separated).")] = ...,
+    checkpoint: Annotated[Path, typer.Option(help="Model checkpoint path.")] = ...,  # type: ignore[assignment]
+    pdb: Annotated[Path, typer.Option(help="PDB/mmCIF structure file.")] = ...,  # type: ignore[assignment]
+    chains: Annotated[str, typer.Option(help="Design chain IDs (comma-separated).")] = ...,  # type: ignore[assignment]
     num_samples: Annotated[int, typer.Option(help="Monte Carlo samples.")] = 1,
     model_type: Annotated[
         str, typer.Option(help="Model type: protein_mpnn or ligand_mpnn.")

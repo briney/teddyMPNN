@@ -86,4 +86,4 @@ class PositionalEncodings(nn.Module):
         d_onehot = F.one_hot(d, num_classes=self.num_positional_features).float()
 
         # Project: (B, L, K, 16)
-        return self.embed_positional_features(d_onehot)
+        return self.embed_positional_features(d_onehot)  # type: ignore[no-any-return]

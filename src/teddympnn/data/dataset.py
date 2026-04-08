@@ -144,7 +144,7 @@ class PPIDataset(Dataset[dict[str, Any]]):
         if self.cache_dir:
             cache_path = self.cache_dir / f"{manifest_idx}.pt"
             if cache_path.exists():
-                return torch.load(cache_path, weights_only=False)
+                return dict(torch.load(cache_path, weights_only=False))
 
         row = self.manifest.iloc[manifest_idx]
         structure_path = Path(row["structure_path"])
@@ -284,7 +284,7 @@ class MixedDataLoader:
 
         from teddympnn.data.sampler import TokenBudgetBatchSampler
 
-        self._concat = ConcatDataset(self.datasets)
+        self._concat: ConcatDataset[dict[str, Any]] = ConcatDataset(self.datasets)
 
         # Assign per-sample weights based on dataset membership
         sample_weights: list[float] = []
@@ -312,7 +312,7 @@ class MixedDataLoader:
             shuffle=self.shuffle,
         )
 
-    def __iter__(self):  # noqa: ANN204
+    def __iter__(self) -> Any:  # noqa: ANN204
         """Iterate over batches."""
         loader = DataLoader(
             self._concat,

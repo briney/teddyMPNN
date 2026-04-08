@@ -221,7 +221,7 @@ def download_pdb_structures(
                 chain_labels,
                 distance_cutoff=interface_distance,
             )
-            n_contacts = interface.sum().item()
+            n_contacts = int(interface.sum().item())
             if n_contacts >= min_interface_contacts:
                 records.append(
                     {

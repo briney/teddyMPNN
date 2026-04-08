@@ -31,4 +31,4 @@ class PositionWiseFeedForward(nn.Module):
         Returns:
             Output tensor of same shape as input.
         """
-        return self.W_out(self.act(self.W_in(h_V)))
+        return self.W_out(self.act(self.W_in(h_V)))  # type: ignore[no-any-return]

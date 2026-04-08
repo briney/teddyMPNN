@@ -252,7 +252,7 @@ def load_legacy_weights(
         logger.warning("Unexpected keys in legacy checkpoint: %s", unexpected)
 
     logger.info("Loaded legacy checkpoint from %s", path)
-    return checkpoint
+    return dict(checkpoint)
 
 
 def convert_to_legacy(state_dict: dict[str, torch.Tensor]) -> OrderedDict[str, torch.Tensor]:

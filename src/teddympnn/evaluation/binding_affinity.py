@@ -201,8 +201,8 @@ def score_structure(
     # Since we seeded above and noise consumed a fixed amount of randomness
     # (determined by X.shape, identical for wt and mut), the decoding order
     # will be identical when called with the same seed.
-    per_residue = model.score(features, score_mask=score_mask)
-    return per_residue.sum().item()
+    per_residue: torch.Tensor = model.score(features, score_mask=score_mask)  # type: ignore[operator]
+    return float(per_residue.sum().item())
 
 
 @torch.no_grad()

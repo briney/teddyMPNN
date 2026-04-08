@@ -48,7 +48,7 @@ def load_foundry_checkpoint(
         logger.warning("Unexpected keys in Foundry checkpoint: %s", unexpected)
 
     logger.info("Loaded Foundry checkpoint from %s", path)
-    return checkpoint
+    return dict(checkpoint)
 
 
 def export_foundry_checkpoint(

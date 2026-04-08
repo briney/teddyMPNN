@@ -41,8 +41,9 @@ class NoamScheduler(LambdaLR):
         def lr_lambda(step: int) -> float:
             if step == 0:
                 return 0.0
-            return self.factor * (
-                self.d_model ** (-0.5) * min(step ** (-0.5), step * self.warmup_steps ** (-1.5))
+            return float(
+                self.factor
+                * (self.d_model ** (-0.5) * min(step ** (-0.5), step * self.warmup_steps ** (-1.5)))
             )
 
         super().__init__(optimizer, lr_lambda, last_epoch=last_epoch)

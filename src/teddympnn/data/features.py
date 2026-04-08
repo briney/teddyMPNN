@@ -12,7 +12,7 @@ from typing import Any
 
 import numpy as np
 import torch
-from Bio.PDB import MMCIFParser, PDBParser
+from Bio.PDB import MMCIFParser, PDBParser  # type: ignore[attr-defined]
 from Bio.PDB.Residue import Residue  # noqa: TC002 — used in type annotations
 
 from teddympnn.models.tokens import (
@@ -191,9 +191,9 @@ def _get_parser(path: Path) -> PDBParser | MMCIFParser:
     """Select the appropriate BioPython parser based on file extension."""
     suffix = path.suffix.lower()
     if suffix in (".pdb", ".ent"):
-        return PDBParser(QUIET=True)
+        return PDBParser(QUIET=True)  # type: ignore[no-untyped-call]
     if suffix in (".cif", ".mmcif"):
-        return MMCIFParser(QUIET=True)
+        return MMCIFParser(QUIET=True)  # type: ignore[no-untyped-call]
     msg = f"Unsupported structure file format: {suffix}"
     raise ValueError(msg)
 
@@ -223,7 +223,7 @@ def _is_protein_residue(residue: Residue) -> bool:
     return resname in MODIFIED_AA_MAP
 
 
-def _extract_residue_atoms(residue: Residue) -> tuple[np.ndarray, np.ndarray]:
+def _extract_residue_atoms(residue: Residue) -> tuple[np.ndarray[Any, Any], np.ndarray[Any, Any]]:
     """Extract 37-atom coordinates and validity mask from a BioPython residue.
 
     Returns:
@@ -295,11 +295,11 @@ def parse_structure(path: str | Path) -> dict[str, Any]:
     """
     path = Path(path)
     parser = _get_parser(path)
-    structure = parser.get_structure("s", str(path))
+    structure = parser.get_structure("s", str(path))  # type: ignore[no-untyped-call]
     model = next(structure.get_models())
 
-    all_coords: list[np.ndarray] = []
-    all_masks: list[np.ndarray] = []
+    all_coords: list[np.ndarray[Any, Any]] = []
+    all_masks: list[np.ndarray[Any, Any]] = []
     all_tokens: list[int] = []
     all_chain_labels: list[int] = []
     all_r_idx: list[int] = []
@@ -399,10 +399,10 @@ def extract_ligand_atoms(path: str | Path) -> dict[str, torch.Tensor]:
     """
     path = Path(path)
     parser = _get_parser(path)
-    structure = parser.get_structure("s", str(path))
+    structure = parser.get_structure("s", str(path))  # type: ignore[no-untyped-call]
     model = next(structure.get_models())
 
-    coords_list: list[np.ndarray] = []
+    coords_list: list[np.ndarray[Any, Any]] = []
     types_list: list[int] = []
 
     for chain in model:
@@ -526,11 +526,11 @@ def extract_sidechain_atoms(
     elem_per_atom = torch.tensor(sc_element_indices, dtype=torch.long)
 
     # Tile for all selected residues: (M, 33) → (M*33,)
-    num_selected = selected.sum().item()
+    num_selected = int(selected.sum().item())
     flat_types = elem_per_atom.unsqueeze(0).expand(num_selected, -1).reshape(-1)
 
     return {
         "Y": flat_coords[valid],
-        "Y_m": torch.ones(valid.sum(), dtype=torch.bool),
+        "Y_m": torch.ones(int(valid.sum().item()), dtype=torch.bool),
         "Y_t": flat_types[valid],
     }

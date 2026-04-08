@@ -117,7 +117,7 @@ class LigandMPNN(ProteinMPNN):
         input_features: dict[str, torch.Tensor],
     ) -> dict[str, torch.Tensor]:
         """Compute graph features including ligand context."""
-        return self.graph_featurization_module(
+        return self.graph_featurization_module(  # type: ignore[no-any-return]
             X=input_features["X"],
             residue_mask=input_features["residue_mask"],
             R_idx=input_features["R_idx"],
