@@ -37,6 +37,12 @@ class TestCLIHelp:
         result = runner.invoke(app, ["download", "nvidia-complexes", "--help"])
         assert result.exit_code == 0
 
+    def test_download_prepare_manifests_help(self) -> None:
+        """download prepare-manifests --help works."""
+        result = runner.invoke(app, ["download", "prepare-manifests", "--help"])
+        assert result.exit_code == 0
+        assert "val-fraction" in result.output.lower() or "validation" in result.output.lower()
+
     def test_download_pretrained_help(self) -> None:
         """download pretrained --help works."""
         result = runner.invoke(app, ["download", "pretrained", "--help"])
@@ -67,6 +73,12 @@ class TestCLIHelp:
         """evaluate recovery --help works."""
         result = runner.invoke(app, ["evaluate", "recovery", "--help"])
         assert result.exit_code == 0
+
+    def test_evaluate_benchmark_help(self) -> None:
+        """evaluate benchmark --help works."""
+        result = runner.invoke(app, ["evaluate", "benchmark", "--help"])
+        assert result.exit_code == 0
+        assert "config" in result.output.lower()
 
     def test_evaluate_ddg_help(self) -> None:
         """evaluate ddg --help works."""

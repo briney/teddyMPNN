@@ -15,6 +15,7 @@ from teddympnn.data.features import (
     parse_structure,
 )
 from teddympnn.data.sampler import TokenBudgetBatchSampler
+from teddympnn.data.splits import prepare_manifests
 
 __all__ = [
     "PaddingCollator",
@@ -24,4 +25,5 @@ __all__ = [
     "extract_ligand_atoms",
     "identify_interface_residues",
     "parse_structure",
+    "prepare_manifests",
 ]

@@ -1,0 +1,35 @@
+# Benchmark configuration: compare fine-tuned models against baselines
+#
+# Usage:
+#   teddympnn evaluate benchmark --config configs/benchmark.yaml --output results/benchmark.json
+
+models:
+  # Baselines (pretrained, no fine-tuning)
+  - name: "ProteinMPNN (vanilla)"
+    checkpoint: "weights/v_48_020.pt"
+    model_type: "protein_mpnn"
+  - name: "LigandMPNN (vanilla)"
+    checkpoint: "weights/v_32_010_25.pt"
+    model_type: "ligand_mpnn"
+
+  # Fine-tuned models
+  - name: "teddyMPNN-P (full)"
+    checkpoint: "outputs/run1_proteinmpnn_full/checkpoints/step_0300000.pt"
+    model_type: "protein_mpnn"
+  - name: "teddyMPNN-L (full)"
+    checkpoint: "outputs/run2_ligandmpnn_full/checkpoints/step_0300000.pt"
+    model_type: "ligand_mpnn"
+  - name: "teddyMPNN-P (ablation)"
+    checkpoint: "outputs/run3_proteinmpnn_ablation/checkpoints/step_0300000.pt"
+    model_type: "protein_mpnn"
+  - name: "teddyMPNN-L (ablation)"
+    checkpoint: "outputs/run4_ligandmpnn_ablation/checkpoints/step_0300000.pt"
+    model_type: "ligand_mpnn"
+
+# Test sets for sequence recovery
+test_manifests:
+  held_out: "data/manifests/val_manifest.tsv"
+
+# SKEMPI v2.0 directory (auto-downloaded if missing)
+skempi_dir: "data/skempi"
+num_samples: 20

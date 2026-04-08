@@ -51,10 +51,16 @@ def _build_network_input(
         chain[:, L:] = 1
 
     if L2:
-        R_idx = torch.cat([
-            torch.arange(L, device=device),
-            torch.arange(L2, device=device),
-        ]).unsqueeze(0).expand(B, -1)
+        R_idx = (
+            torch.cat(
+                [
+                    torch.arange(L, device=device),
+                    torch.arange(L2, device=device),
+                ]
+            )
+            .unsqueeze(0)
+            .expand(B, -1)
+        )
         designed = torch.zeros(B, total_L, dtype=torch.bool, device=device)
         designed[:, :L] = True
     else:
@@ -169,9 +175,7 @@ def main() -> None:
         model = model.to(device).eval()
 
         cases = {
-            "with_ligand": _build_network_input(
-                1, 40, seed=789, device=device, N_ligand=10
-            ),
+            "with_ligand": _build_network_input(1, 40, seed=789, device=device, N_ligand=10),
         }
         generate_reference("ligandmpnn", model, cases, device)
     else:
