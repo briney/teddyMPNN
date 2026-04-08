@@ -29,6 +29,7 @@ dev = [
     "pytest>=7.0",
     "ruff>=0.4",
     "mypy>=1.0",
+    "types-PyYAML>=6.0",
     "pre-commit>=3.0",
 ]
 data = [
@@ -83,6 +84,8 @@ module = [
     "Bio.*",
     "pdbtools.*",
     "zstandard",
+    "aiohttp",
+    "aiohttp.*",
     "wandb",
     "wandb.*",
 ]
