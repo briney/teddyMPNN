@@ -172,6 +172,9 @@ def recovery(
     model_type: Annotated[
         str, typer.Option(help="Model type: protein_mpnn or ligand_mpnn.")
     ] = "protein_mpnn",
+    interface_cutoff: Annotated[
+        float, typer.Option(help="CB-CB distance cutoff for interface residues (A).")
+    ] = 8.0,
 ) -> None:
     """Evaluate interface sequence recovery on a test set."""
     import torch
@@ -179,6 +182,7 @@ def recovery(
     from teddympnn.data.collator import PaddingCollator
     from teddympnn.data.dataset import PPIDataset
     from teddympnn.data.sampler import TokenBudgetBatchSampler
+    from teddympnn.evaluation.sequence_recovery import compute_recovery
     from teddympnn.models import LigandMPNN, ProteinMPNN
     from teddympnn.weights.io import load_checkpoint_bundle
 
@@ -188,29 +192,29 @@ def recovery(
     model = model_cls()
     load_checkpoint_bundle(checkpoint, model, map_location=device)
     model = model.to(device)
-    model.eval()
 
     dataset = PPIDataset(data, include_ligand_atoms=(model_type == "ligand_mpnn"))
     collator = PaddingCollator()
     sampler = TokenBudgetBatchSampler(dataset.lengths, token_budget=10_000, shuffle=False)
     loader = torch.utils.data.DataLoader(dataset, batch_sampler=sampler, collate_fn=collator)
 
-    total_correct = 0
-    total_designed = 0
+    results = compute_recovery(model, loader, interface_cutoff=interface_cutoff, device=device)
 
-    with torch.no_grad():
-        for batch in loader:
-            batch = {
-                k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in batch.items()
-            }
-            output = model(batch)
-            preds = output["log_probs"].argmax(dim=-1)
-            mask = batch["designed_residue_mask"].bool()
-            total_correct += ((preds == batch["S"]) & mask).sum().item()
-            total_designed += mask.sum().item()
-
-    rec = total_correct / max(total_designed, 1)
-    typer.echo(f"Sequence recovery: {rec:.4f} ({total_correct}/{total_designed})")
+    typer.echo(f"Structures evaluated: {results.n_structures}")
+    typer.echo(
+        f"Overall recovery:     {results.overall_recovery:.4f} "
+        f"({results.n_designed_residues} residues)"
+    )
+    typer.echo(
+        f"Interface recovery:   {results.interface_recovery:.4f} "
+        f"({results.n_interface_residues} residues)"
+    )
+    typer.echo(f"Per-structure (macro): {results.per_structure_recovery:.4f}")
+    typer.echo(f"Per-struct interface:  {results.per_structure_interface_recovery:.4f}")
+    if results.size_bin_recoveries:
+        typer.echo("Interface size bins:")
+        for name, rec in sorted(results.size_bin_recoveries.items()):
+            typer.echo(f"  {name}: {rec:.4f}")
 
 
 @evaluate_app.command()
@@ -221,13 +225,41 @@ def ddg(
     model_type: Annotated[
         str, typer.Option(help="Model type: protein_mpnn or ligand_mpnn.")
     ] = "protein_mpnn",
+    noise: Annotated[float, typer.Option(help="Backbone noise for scoring (A).")] = 0.0,
+    max_entries: Annotated[int | None, typer.Option(help="Limit entries (for testing).")] = None,
 ) -> None:
     """Evaluate binding affinity prediction on SKEMPI v2.0."""
-    typer.echo(
-        "ddG evaluation requires the evaluation module (Phase 4). "
-        "Use `teddympnn evaluate recovery` for sequence recovery."
+    import torch
+
+    from teddympnn.evaluation.skempi import evaluate_skempi
+    from teddympnn.models import LigandMPNN, ProteinMPNN
+    from teddympnn.weights.io import load_checkpoint_bundle
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    model_cls = LigandMPNN if model_type == "ligand_mpnn" else ProteinMPNN
+    model = model_cls()
+    load_checkpoint_bundle(checkpoint, model, map_location=device)
+    model = model.to(device)
+
+    results = evaluate_skempi(
+        model,
+        skempi,
+        num_samples=num_samples,
+        structure_noise=noise,
+        device=device,
+        max_entries=max_entries,
     )
-    raise typer.Exit(code=1)
+
+    typer.echo(
+        f"SKEMPI v2.0 Results ({results.n_entries} entries, {results.n_structures} structures)"
+    )
+    typer.echo(f"  Spearman:  {results.spearman:.4f}")
+    typer.echo(f"  Pearson:   {results.pearson:.4f}")
+    typer.echo(f"  RMSE:      {results.rmse:.4f}")
+    typer.echo(f"  MAE:       {results.mae:.4f}")
+    typer.echo(f"  AUROC:     {results.auroc:.4f}")
+    typer.echo(f"  Per-struct Spearman (median): {results.per_structure_spearman_median:.4f}")
 
 
 # ---------------------------------------------------------------------------

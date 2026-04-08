@@ -291,6 +291,7 @@ def parse_structure(path: str | Path) -> dict[str, Any]:
         - ``chain_labels``: ``(L,)`` int64 — numeric chain identifiers.
         - ``residue_mask``: ``(L,)`` bool — residue validity mask (all True).
         - ``chain_ids``: ``list[str]`` — original chain ID per residue.
+        - ``residue_numbers``: ``list[int]`` — PDB residue sequence numbers.
     """
     path = Path(path)
     parser = _get_parser(path)
@@ -303,6 +304,7 @@ def parse_structure(path: str | Path) -> dict[str, Any]:
     all_chain_labels: list[int] = []
     all_r_idx: list[int] = []
     all_chain_ids: list[str] = []
+    all_residue_numbers: list[int] = []
 
     chain_id_map: dict[str, int] = {}
 
@@ -339,6 +341,7 @@ def parse_structure(path: str | Path) -> dict[str, Any]:
             all_chain_labels.append(label)
             all_r_idx.append(residue_counter)
             all_chain_ids.append(chain_id)
+            all_residue_numbers.append(residue.id[1])
             residue_counter += 1
 
     if not all_coords:
@@ -353,6 +356,7 @@ def parse_structure(path: str | Path) -> dict[str, Any]:
         "chain_labels": torch.tensor(all_chain_labels, dtype=torch.long),
         "residue_mask": torch.ones(len(all_coords), dtype=torch.bool),
         "chain_ids": all_chain_ids,
+        "residue_numbers": all_residue_numbers,
     }
 
 
