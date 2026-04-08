@@ -39,6 +39,9 @@ train = [
     "wandb>=0.15",
 ]
 
+[project.scripts]
+teddympnn = "teddympnn.cli:app"
+
 [project.urls]
 Repository = "https://github.com/briney/teddympnn"
 
