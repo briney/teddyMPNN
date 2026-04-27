@@ -6,10 +6,10 @@
 models:
   # Baselines (pretrained, no fine-tuning)
   - name: "ProteinMPNN (vanilla)"
-    checkpoint: "weights/v_48_020.pt"
+    checkpoint: "weights/proteinmpnn_v_48_020.pt"
     model_type: "protein_mpnn"
   - name: "LigandMPNN (vanilla)"
-    checkpoint: "weights/v_32_010_25.pt"
+    checkpoint: "weights/ligandmpnn_v_32_010_25.pt"
     model_type: "ligand_mpnn"
 
   # Fine-tuned models

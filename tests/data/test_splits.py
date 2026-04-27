@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 from teddympnn.data.splits import (
+    MANIFEST_COLUMNS,
     _hash_split,
     prepare_manifests,
     split_nvidia_manifest,
@@ -162,9 +163,11 @@ class TestPrepareManifests:
 
         train_df = pd.read_csv(train_path, sep="\t")
         val_df = pd.read_csv(val_path, sep="\t")
-        assert set(train_df.columns) == {"structure_path", "chain_A", "chain_B", "source"}
+        assert tuple(train_df.columns) == MANIFEST_COLUMNS
         assert (train_df["source"] == "pdb").all()
         assert len(train_df) + len(val_df) == 40
+        assert (tmp_path / "manifests" / "train_pdb.tsv").exists()
+        assert (tmp_path / "manifests" / "val_pdb.tsv").exists()
 
     def test_multiple_sources(
         self,
@@ -193,6 +196,9 @@ class TestPrepareManifests:
         # Split stats file written
         stats_path = tmp_path / "manifests" / "split_stats.tsv"
         assert stats_path.exists()
+        for source in ["teddymer", "nvidia", "pdb"]:
+            assert (tmp_path / "manifests" / f"train_{source}.tsv").exists()
+            assert (tmp_path / "manifests" / f"val_{source}.tsv").exists()
 
     def test_no_sources_raises(self, tmp_path: Path) -> None:
         """Raises ValueError when no sources are provided."""

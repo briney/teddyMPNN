@@ -174,6 +174,7 @@ def download_nvidia_chunks(
         Number of successfully downloaded chunks.
     """
     import urllib.request
+    from concurrent.futures import ThreadPoolExecutor
 
     manifest_path = Path(manifest_path)
     output_dir = Path(output_dir)
@@ -183,23 +184,27 @@ def download_nvidia_chunks(
     chunk_ids = sorted(df[chunk_column].unique())
     logger.info("Downloading %d chunk tarballs", len(chunk_ids))
 
+    def _download_one(chunk_id: int) -> bool:
+        tar_path = output_dir / f"chunk_{chunk_id:04d}.tar"
+        if tar_path.exists():
+            return True
+
+        url = CHUNK_URL_TEMPLATE.format(chunk_id=chunk_id)
+        try:
+            urllib.request.urlretrieve(url, tar_path)
+            return True
+        except Exception:
+            logger.warning("Failed to download chunk %d", chunk_id, exc_info=True)
+            return False
+
     downloaded = 0
     with Progress() as progress:
         task = progress.add_task("Downloading chunks", total=len(chunk_ids))
-        for chunk_id in chunk_ids:
-            tar_path = output_dir / f"chunk_{chunk_id:04d}.tar"
-            if tar_path.exists():
-                downloaded += 1
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            for ok in pool.map(_download_one, chunk_ids):
+                if ok:
+                    downloaded += 1
                 progress.advance(task)
-                continue
-
-            url = CHUNK_URL_TEMPLATE.format(chunk_id=chunk_id)
-            try:
-                urllib.request.urlretrieve(url, tar_path)
-                downloaded += 1
-            except Exception:
-                logger.warning("Failed to download chunk %d", chunk_id, exc_info=True)
-            progress.advance(task)
 
     logger.info("Downloaded %d / %d chunks", downloaded, len(chunk_ids))
     return downloaded
@@ -248,6 +253,7 @@ def extract_nvidia_structures(
         chunk_to_filenames.setdefault(cid, set()).add(str(row["filename"]))
 
     extracted = 0
+    manifest_records: list[dict[str, str | int]] = []
     with Progress() as progress:
         task = progress.add_task("Extracting structures", total=len(chunk_to_filenames))
         for chunk_id, filenames in chunk_to_filenames.items():
@@ -285,10 +291,37 @@ def extract_nvidia_structures(
                             out_path = output_dir / out_name
                             out_path.write_bytes(data)
                             extracted += 1
+                            matching = df[df["filename"].astype(str).map(Path).map(lambda p: p.name) == basename]
+                            row = matching.iloc[0] if not matching.empty else None
+                            source_id = (
+                                str(row.get("model_id", out_name)) if row is not None else out_name
+                            )
+                            manifest_records.append(
+                                {
+                                    "structure_path": str(out_path),
+                                    "chain_A": str(row.get("chain_A", "A"))
+                                    if row is not None
+                                    else "A",
+                                    "chain_B": str(row.get("chain_B", "B"))
+                                    if row is not None
+                                    else "B",
+                                    "source": "nvidia",
+                                    "source_id": source_id,
+                                    "split_group": source_id,
+                                    "interface_residues": int(row.get("interface_residues", 0))
+                                    if row is not None
+                                    else 0,
+                                }
+                            )
             except Exception:
                 logger.warning("Error processing chunk %d", chunk_id, exc_info=True)
 
             progress.advance(task)
 
     logger.info("Extracted %d structures", extracted)
+    if manifest_records:
+        training_manifest = pd.DataFrame(manifest_records)
+        manifest_out = output_dir / "manifest.tsv"
+        training_manifest.to_csv(manifest_out, sep="\t", index=False)
+        logger.info("Wrote NVIDIA training manifest to %s", manifest_out)
     return extracted

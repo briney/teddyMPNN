@@ -17,7 +17,13 @@ from typing import Any
 
 import torch
 
-from teddympnn.data.features import derive_backbone, parse_structure
+from teddympnn.data.features import (
+    derive_backbone,
+    extract_ligand_atoms,
+    extract_sidechain_atoms,
+    parse_structure,
+)
+from teddympnn.models.ligand_mpnn import LigandMPNN
 from teddympnn.models.tokens import (
     AMINO_ACIDS_1TO3,
     idx_to_token,
@@ -36,10 +42,12 @@ def _make_batch(
     features: dict[str, Any],
     designed_mask: torch.Tensor,
     device: torch.device,
+    *,
+    include_ligand_context: bool = False,
 ) -> dict[str, torch.Tensor]:
     """Create a single-example batch (B=1) from unbatched features."""
     X, X_m = derive_backbone(features["xyz_37"], features["xyz_37_m"])
-    return {
+    batch = {
         "X": X.unsqueeze(0).to(device),
         "S": features["S"].unsqueeze(0).to(device),
         "R_idx": features["R_idx"].unsqueeze(0).to(device),
@@ -48,6 +56,24 @@ def _make_batch(
         "designed_residue_mask": designed_mask.unsqueeze(0).to(device),
         "fixed_residue_mask": (~designed_mask).unsqueeze(0).to(device),
     }
+    if include_ligand_context:
+        Y = features.get("Y", torch.zeros(0, 3, dtype=torch.float32))
+        Y_m = features.get("Y_m", torch.zeros(0, dtype=torch.bool))
+        Y_t = features.get("Y_t", torch.zeros(0, dtype=torch.long))
+        sidechains = extract_sidechain_atoms(
+            features["xyz_37"],
+            features["xyz_37_m"],
+            features["S"],
+            ~designed_mask,
+        )
+        if sidechains["Y"].shape[0] > 0:
+            Y = torch.cat([Y, sidechains["Y"]], dim=0)
+            Y_m = torch.cat([Y_m, sidechains["Y_m"]], dim=0)
+            Y_t = torch.cat([Y_t, sidechains["Y_t"]], dim=0)
+        batch["Y"] = Y.unsqueeze(0).to(device)
+        batch["Y_m"] = Y_m.unsqueeze(0).to(device)
+        batch["Y_t"] = Y_t.unsqueeze(0).to(device)
+    return batch
 
 
 def _extract_chain_features(
@@ -254,6 +280,9 @@ def predict_ddg(
 
     # Parse structure
     features = parse_structure(structure_path)
+    is_ligand_model = isinstance(model, LigandMPNN)
+    if is_ligand_model:
+        features.update(extract_ligand_atoms(structure_path))
     chain_ids: list[str] = features["chain_ids"]
     residue_numbers: list[int] = features["residue_numbers"]
 
@@ -311,12 +340,42 @@ def predict_ddg(
     L_a = len(chain_a_ids)
     L_b = len(chain_b_ids)
 
-    batch_ab_wt = _make_batch(features, torch.ones(L_ab, dtype=torch.bool), device)
-    batch_ab_mut = _make_batch(mut_features, torch.ones(L_ab, dtype=torch.bool), device)
-    batch_a_wt = _make_batch(chain_a_wt, torch.ones(L_a, dtype=torch.bool), device)
-    batch_a_mut = _make_batch(chain_a_mut, torch.ones(L_a, dtype=torch.bool), device)
-    batch_b_wt = _make_batch(chain_b_wt, torch.ones(L_b, dtype=torch.bool), device)
-    batch_b_mut = _make_batch(chain_b_mut, torch.ones(L_b, dtype=torch.bool), device)
+    batch_ab_wt = _make_batch(
+        features,
+        mask_ab,
+        device,
+        include_ligand_context=is_ligand_model,
+    )
+    batch_ab_mut = _make_batch(
+        mut_features,
+        mask_ab,
+        device,
+        include_ligand_context=is_ligand_model,
+    )
+    batch_a_wt = _make_batch(
+        chain_a_wt,
+        mask_a,
+        device,
+        include_ligand_context=is_ligand_model,
+    )
+    batch_a_mut = _make_batch(
+        chain_a_mut,
+        mask_a,
+        device,
+        include_ligand_context=is_ligand_model,
+    )
+    batch_b_wt = _make_batch(
+        chain_b_wt,
+        mask_b,
+        device,
+        include_ligand_context=is_ligand_model,
+    )
+    batch_b_mut = _make_batch(
+        chain_b_mut,
+        mask_b,
+        device,
+        include_ligand_context=is_ligand_model,
+    )
 
     # Score masks (on device, shape (1, L))
     smask_ab = mask_ab.unsqueeze(0).to(device)

@@ -11,20 +11,34 @@ model:
   num_neighbors: 48
   dropout_rate: 0.1
 
-pretrained_weights: weights/v_48_020.pt
+pretrained_weights: weights/proteinmpnn_v_48_020.pt
 
 data_sources:
   - name: teddymer
     weight: 0.60
-    path: data/manifests/train_manifest.tsv
+    path: data/manifests/train_teddymer.tsv
     source_type: teddymer
   - name: nvidia
     weight: 0.20
-    path: data/manifests/train_manifest.tsv
+    path: data/manifests/train_nvidia.tsv
     source_type: nvidia
   - name: pdb
     weight: 0.20
-    path: data/manifests/train_manifest.tsv
+    path: data/manifests/train_pdb.tsv
+    source_type: pdb
+
+validation_data_sources:
+  - name: teddymer
+    weight: 0.60
+    path: data/manifests/val_teddymer.tsv
+    source_type: teddymer
+  - name: nvidia
+    weight: 0.20
+    path: data/manifests/val_nvidia.tsv
+    source_type: nvidia
+  - name: pdb
+    weight: 0.20
+    path: data/manifests/val_pdb.tsv
     source_type: pdb
 
 token_budget: 10000

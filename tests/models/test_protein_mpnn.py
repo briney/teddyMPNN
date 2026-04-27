@@ -72,9 +72,11 @@ class TestProteinMPNNArchitecture:
     def test_parameter_count(self) -> None:
         """Parameter count for default ProteinMPNN configuration.
 
-        NOTE: exact match against Foundry checkpoints is verified in the
-        validation gate (tests/validation/). This test locks the count for
-        regression detection.
+        NOTE: This test locks the count produced by the current implementation
+        for regression detection only. The original architecture spec cited
+        1,656,981 (a 3,504-parameter divergence). Resolve by loading
+        Foundry-current weights with ``strict=True`` in the validation gate
+        (tests/validation/test_foundry_equivalence.py).
         """
         model = ProteinMPNN()
         total_params = sum(p.numel() for p in model.parameters())

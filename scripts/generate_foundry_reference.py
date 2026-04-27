@@ -174,8 +174,18 @@ def main() -> None:
         load_legacy_weights(model, str(lmpnn_weights))
         model = model.to(device).eval()
 
+        no_ctx_input = _build_network_input(1, 40, seed=2024, device=device, N_ligand=8)
+        # Mask every ligand atom so the context branch has nothing to attend to.
+        no_ctx_input["input_features"]["Y_m"] = torch.zeros_like(
+            no_ctx_input["input_features"]["Y_m"]
+        )
+
         cases = {
             "with_ligand": _build_network_input(1, 40, seed=789, device=device, N_ligand=10),
+            "two_chain_with_ligand": _build_network_input(
+                1, 30, seed=321, device=device, L2=20, N_ligand=12
+            ),
+            "no_context": no_ctx_input,
         }
         generate_reference("ligandmpnn", model, cases, device)
     else:

@@ -185,6 +185,18 @@ class TestProteinMPNNDecoder:
 # ---------------------------------------------------------------------------
 
 
+LIGANDMPNN_CASES = ["with_ligand", "two_chain_with_ligand"]
+
+
+def _load_ligand_model_with_foundry_weights(ref: dict):
+    from teddympnn.models.ligand_mpnn import LigandMPNN
+
+    model = LigandMPNN()
+    model.load_state_dict(ref["state_dict"], strict=True)
+    model.eval()
+    return model
+
+
 @requires_reference_data
 class TestLigandMPNNWeightLoading:
     """Verify Foundry LigandMPNN state_dict loads into our model."""
@@ -195,3 +207,180 @@ class TestLigandMPNNWeightLoading:
         ref = load_reference("ligandmpnn_foundry_state_dict")
         model = LigandMPNN()
         model.load_state_dict(ref["state_dict"], strict=True)
+
+    def test_state_dict_keys_match(self) -> None:
+        from teddympnn.models.ligand_mpnn import LigandMPNN
+
+        ref = load_reference("ligandmpnn_foundry_state_dict")
+        model = LigandMPNN()
+        our_keys = set(model.state_dict().keys())
+        ref_keys = set(ref["state_dict"].keys())
+        assert our_keys == ref_keys, (
+            f"Key mismatch: {our_keys.symmetric_difference(ref_keys)}"
+        )
+
+
+@requires_reference_data
+class TestLigandMPNNGraphFeaturization:
+    """Verify the LigandMPNN graph featurizer matches Foundry."""
+
+    @pytest.mark.parametrize("case", LIGANDMPNN_CASES)
+    def test_neighbor_indices_and_edges(self, case: str) -> None:
+        ref = load_reference(f"ligandmpnn_{case}")
+        model = _load_ligand_model_with_foundry_weights(ref)
+
+        with torch.no_grad():
+            result = model.graph_featurization_module(
+                X=ref["input_features"]["X_backbone"],
+                residue_mask=ref["input_features"]["residue_mask"].float(),
+                R_idx=ref["input_features"]["R_idx"],
+                chain_labels=ref["input_features"]["chain_labels"],
+                Y=ref["input_features"]["Y"],
+                Y_m=ref["input_features"]["Y_m"].float(),
+                Y_t=ref["input_features"]["Y_t"],
+                structure_noise=0.0,
+            )
+
+        # Backbone neighbor topology and edge features.
+        assert torch.equal(result["E_idx"], ref["graph_features"]["E_idx"])
+        torch.testing.assert_close(
+            result["E"], ref["graph_features"]["E"], atol=1e-5, rtol=1e-5
+        )
+        # Ligand context features.
+        torch.testing.assert_close(
+            result["E_protein_to_ligand"],
+            ref["graph_features"]["E_protein_to_ligand"],
+            atol=1e-5,
+            rtol=1e-5,
+        )
+        torch.testing.assert_close(
+            result["ligand_subgraph_nodes"],
+            ref["graph_features"]["ligand_subgraph_nodes"],
+            atol=1e-5,
+            rtol=1e-5,
+        )
+        torch.testing.assert_close(
+            result["ligand_subgraph_edges"],
+            ref["graph_features"]["ligand_subgraph_edges"],
+            atol=1e-5,
+            rtol=1e-5,
+        )
+
+
+@requires_reference_data
+class TestLigandMPNNEncoder:
+    """Verify the LigandMPNN encoder matches Foundry."""
+
+    @pytest.mark.parametrize("case", LIGANDMPNN_CASES)
+    def test_encoder_h_V(self, case: str) -> None:
+        ref = load_reference(f"ligandmpnn_{case}")
+        model = _load_ligand_model_with_foundry_weights(ref)
+
+        input_features = {
+            "residue_mask": ref["input_features"]["residue_mask"].float(),
+            "Y_m": ref["input_features"]["Y_m"].float(),
+        }
+
+        with torch.no_grad():
+            enc = model.encode(input_features, ref["graph_features"])
+
+        torch.testing.assert_close(
+            enc["h_V"], ref["encoder_features"]["h_V"], atol=1e-5, rtol=1e-5
+        )
+
+    @pytest.mark.parametrize("case", LIGANDMPNN_CASES)
+    def test_encoder_h_E(self, case: str) -> None:
+        ref = load_reference(f"ligandmpnn_{case}")
+        model = _load_ligand_model_with_foundry_weights(ref)
+
+        input_features = {
+            "residue_mask": ref["input_features"]["residue_mask"].float(),
+            "Y_m": ref["input_features"]["Y_m"].float(),
+        }
+
+        with torch.no_grad():
+            enc = model.encode(input_features, ref["graph_features"])
+
+        # Same widened tolerance for h_E as ProteinMPNN.
+        torch.testing.assert_close(
+            enc["h_E"], ref["encoder_features"]["h_E"], atol=5e-5, rtol=1e-4
+        )
+
+
+@requires_reference_data
+class TestLigandMPNNDecoder:
+    """Verify the LigandMPNN decoder matches Foundry under teacher forcing."""
+
+    @pytest.mark.parametrize("case", LIGANDMPNN_CASES)
+    def test_log_probs(self, case: str) -> None:
+        ref = load_reference(f"ligandmpnn_{case}")
+        model = _load_ligand_model_with_foundry_weights(ref)
+
+        input_features = {
+            "S": ref["input_features"]["S"],
+            "residue_mask": ref["input_features"]["residue_mask"].float(),
+        }
+        causality_masks = {
+            "causal_mask": ref["decoder_features"]["causal_mask"],
+            "anti_causal_mask": ref["decoder_features"]["anti_causal_mask"],
+            "decoding_order": ref["decoder_features"]["decoding_order"],
+        }
+
+        with torch.no_grad():
+            dec = model.decode_teacher_forcing(
+                input_features=input_features,
+                graph_features=ref["graph_features"],
+                encoder_output=ref["encoder_features"],
+                causality_masks=causality_masks,
+            )
+
+        torch.testing.assert_close(
+            dec["log_probs"],
+            ref["decoder_features"]["log_probs"],
+            atol=1e-5,
+            rtol=1e-5,
+        )
+
+
+@requires_reference_data
+class TestLigandMPNNNoContext:
+    """Foundry-anchored regression for empty/masked ligand context.
+
+    The Foundry reference for the ``no_context`` case must match our model's
+    output bit-for-bit, AND must equal a backbone-only ProteinMPNN-style
+    encoder run (i.e. the LigandMPNN context branch contributes zero).
+    """
+
+    def test_matches_foundry_reference(self) -> None:
+        ref = load_reference("ligandmpnn_no_context")
+        model = _load_ligand_model_with_foundry_weights(ref)
+
+        input_features = {
+            "residue_mask": ref["input_features"]["residue_mask"].float(),
+            "Y_m": ref["input_features"]["Y_m"].float(),
+        }
+
+        with torch.no_grad():
+            enc = model.encode(input_features, ref["graph_features"])
+
+        torch.testing.assert_close(
+            enc["h_V"], ref["encoder_features"]["h_V"], atol=1e-5, rtol=1e-5
+        )
+
+    def test_no_context_equals_backbone_only(self) -> None:
+        ref = load_reference("ligandmpnn_no_context")
+        model = _load_ligand_model_with_foundry_weights(ref)
+
+        input_features = {
+            "residue_mask": ref["input_features"]["residue_mask"].float(),
+            "Y_m": ref["input_features"]["Y_m"].float(),
+        }
+
+        with torch.no_grad():
+            full = model.encode(input_features, ref["graph_features"])
+            backbone = ProteinMPNN.encode(model, input_features, ref["graph_features"])
+
+        # Empty context must contribute zero — h_V must equal backbone-only.
+        torch.testing.assert_close(
+            full["h_V"], backbone["h_V"], atol=1e-6, rtol=1e-5
+        )

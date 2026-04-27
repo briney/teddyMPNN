@@ -17,6 +17,7 @@ from torch import nn
 
 from teddympnn.models.layers.message_passing import gather_nodes
 from teddympnn.models.layers.positional_encoding import PositionalEncodings
+from teddympnn.models.tokens import SIDE_CHAIN_ATOM_NAMES
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -44,6 +45,255 @@ NUM_CONTEXT_ATOMS: int = 25
 
 # Angle features: sin/cos of two angles = 4
 NUM_ANGLE_FEATURES: int = 4
+
+_ELEMENT_GROUPS: tuple[int, ...] = (
+    1,
+    18,
+    1,
+    2,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    1,
+    2,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    1,
+    2,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    1,
+    2,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    0,
+)
+_ELEMENT_PERIODS: tuple[int, ...] = (
+    1,
+    1,
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    4,
+    5,
+    5,
+    5,
+    5,
+    5,
+    5,
+    5,
+    5,
+    5,
+    5,
+    5,
+    5,
+    5,
+    5,
+    5,
+    5,
+    5,
+    5,
+    6,
+    6,
+    6,
+    6,
+    6,
+    6,
+    6,
+    6,
+    6,
+    6,
+    6,
+    6,
+    6,
+    6,
+    6,
+    6,
+    6,
+    6,
+    6,
+    6,
+    6,
+    6,
+    6,
+    6,
+    6,
+    6,
+    6,
+    6,
+    6,
+    6,
+    6,
+    6,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    0,
+)
+_ELEMENT_INDEX_BY_SYMBOL: dict[str, int] = {
+    "C": 5,
+    "N": 6,
+    "O": 7,
+    "S": 15,
+}
 
 
 # ---------------------------------------------------------------------------
@@ -122,6 +372,24 @@ def compute_knn(
     # Top-k nearest (smallest distances)
     _, E_idx = dist_sq.topk(k, dim=-1, largest=False)
     return E_idx
+
+
+def default_side_chain_atom_types() -> torch.Tensor:
+    """Return element indices for the 32 side-chain atom slots."""
+    return torch.tensor(
+        [_ELEMENT_INDEX_BY_SYMBOL.get(name[0].upper(), NUM_ELEMENT_TYPES - 1) for name in SIDE_CHAIN_ATOM_NAMES],
+        dtype=torch.long,
+    )
+
+
+def default_periodic_table_groups() -> torch.Tensor:
+    """Return periodic-table group classes for the 119 atom-type vocabulary."""
+    return torch.tensor(_ELEMENT_GROUPS, dtype=torch.long)
+
+
+def default_periodic_table_periods() -> torch.Tensor:
+    """Return periodic-table period classes for the 119 atom-type vocabulary."""
+    return torch.tensor(_ELEMENT_PERIODS, dtype=torch.long)
 
 
 # ---------------------------------------------------------------------------
@@ -295,6 +563,7 @@ class ProteinFeaturesLigand(ProteinFeatures):
         hidden_dim: int = 128,
         max_relative_feature: int = 32,
         dropout: float = 0.1,
+        num_context_atoms: int = NUM_CONTEXT_ATOMS,
     ) -> None:
         super().__init__(
             num_positional_embeddings=num_positional_embeddings,
@@ -304,6 +573,7 @@ class ProteinFeaturesLigand(ProteinFeatures):
             max_relative_feature=max_relative_feature,
             dropout=dropout,
         )
+        self.num_context_atoms = num_context_atoms
 
         # Atom type embedding: 146-dim input → 64-dim output
         self.embed_atom_type_features = nn.Linear(
@@ -328,15 +598,15 @@ class ProteinFeaturesLigand(ProteinFeatures):
         # These are populated by the parent LigandMPNN module
         self.register_buffer(
             "side_chain_atom_types",
-            torch.zeros(32, dtype=torch.long),
+            default_side_chain_atom_types(),
         )
         self.register_buffer(
             "periodic_table_groups",
-            torch.zeros(NUM_ELEMENT_TYPES, dtype=torch.long),
+            default_periodic_table_groups(),
         )
         self.register_buffer(
             "periodic_table_periods",
-            torch.zeros(NUM_ELEMENT_TYPES, dtype=torch.long),
+            default_periodic_table_periods(),
         )
 
     def _encode_atom_type(self, atom_types: torch.Tensor) -> torch.Tensor:
@@ -353,10 +623,10 @@ class ProteinFeaturesLigand(ProteinFeatures):
             atom_types.clamp(0, NUM_ELEMENT_TYPES - 1), num_classes=NUM_ELEMENT_TYPES
         ).float()
         # Periodic table group: (..., 19)
-        groups = self.periodic_table_groups[atom_types.clamp(0, NUM_ELEMENT_TYPES - 1)]  # type: ignore[index]
+        groups = self.periodic_table_groups[atom_types.clamp(0, NUM_ELEMENT_TYPES - 1)]
         group_onehot = F.one_hot(groups, num_classes=NUM_PERIODIC_GROUPS).float()
         # Periodic table period: (..., 8)
-        periods = self.periodic_table_periods[atom_types.clamp(0, NUM_ELEMENT_TYPES - 1)]  # type: ignore[index]
+        periods = self.periodic_table_periods[atom_types.clamp(0, NUM_ELEMENT_TYPES - 1)]
         period_onehot = F.one_hot(periods, num_classes=NUM_PERIODIC_PERIODS).float()
         # Concatenate: (..., 146)
         return torch.cat([elem_onehot, group_onehot, period_onehot], dim=-1)
@@ -435,6 +705,26 @@ class ProteinFeaturesLigand(ProteinFeatures):
 
         B, L = X.shape[:2]
         N_atoms = Y.shape[1]
+        if N_atoms == 0:
+            empty_p2l = X.new_zeros(B, L, 0, self.hidden_dim)
+            empty_nodes = X.new_zeros(B, 0, self.hidden_dim)
+            empty_edges = X.new_zeros(B, 0, 0, self.hidden_dim)
+            empty_mask_context = Y_m.new_zeros(B, L, 0)
+            empty_mask_edges = Y_m.new_zeros(B, 0, 0)
+            empty_idx_context = torch.zeros(B, L, 0, dtype=torch.long, device=X.device)
+            empty_idx_edges = torch.zeros(B, 0, 0, dtype=torch.long, device=X.device)
+            result.update(
+                {
+                    "E_protein_to_ligand": empty_p2l,
+                    "ligand_subgraph_nodes": empty_nodes,
+                    "ligand_subgraph_edges": empty_edges,
+                    "ligand_subgraph_Y_m": empty_mask_context,
+                    "ligand_subgraph_Y_m_edges": empty_mask_edges,
+                    "ligand_subgraph_E_idx": empty_idx_edges,
+                    "Y_idx": empty_idx_context,
+                }
+            )
+            return result
 
         # Compute virtual CB for distance calculations
         CB = compute_virtual_cb(X_noisy).squeeze(-2)  # (B, L, 3)
@@ -445,7 +735,7 @@ class ProteinFeaturesLigand(ProteinFeatures):
         # Mask invalid atoms with large distance
         cb_to_y = cb_to_y + (~Y_m.bool()).unsqueeze(1).float() * 1e6
 
-        Kc = min(NUM_CONTEXT_ATOMS, N_atoms)
+        Kc = min(self.num_context_atoms, N_atoms)
         # Select top-Kc nearest: (B, L, Kc)
         _, Y_idx = cb_to_y.topk(Kc, dim=-1, largest=False)
 
@@ -502,7 +792,7 @@ class ProteinFeaturesLigand(ProteinFeatures):
         y_dist = y_diff.norm(dim=-1)
         y_dist = y_dist + (~Y_m.bool()).unsqueeze(1).float() * 1e6
 
-        Ke = min(NUM_CONTEXT_ATOMS, N_atoms)
+        Ke = min(self.num_context_atoms, N_atoms)
         _, Y_edges_idx = y_dist.topk(Ke, dim=-1, largest=False)
 
         # RBF for intraligand edges: (B, N, Ke, 16) → (B, N, Ke, 128)

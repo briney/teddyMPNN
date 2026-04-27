@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import tarfile
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
@@ -70,6 +71,108 @@ def download_teddymer_metadata(output_dir: str | Path) -> Path:
 # ---------------------------------------------------------------------------
 
 
+# AlphaFold-style TED ID, e.g. "AF-Q9Y6K1-F1-model_v4_TED01".
+_TED_ID_UNIPROT_RE = re.compile(r"AF-([A-Z0-9]+)-F\d+")
+
+
+def _derive_chopping_columns(
+    df: pd.DataFrame,
+    metadata_dir: Path,
+) -> pd.DataFrame:
+    """Add ``uniprot_id``/``domain1_chopping``/``domain2_chopping`` columns.
+
+    The teddymer release does not commit to a single column schema, so this
+    function detects and normalizes a few common shapes:
+
+    1. The frame already has ``domain1_chopping`` and ``domain2_chopping``
+       (pass-through).
+    2. The frame has ``domain{1,2}_start`` / ``domain{1,2}_end`` columns —
+       build ``"<start>-<end>"`` strings.
+    3. The frame has ``ted_id1`` / ``ted_id2`` columns — join against a TED
+       domain boundary table found under ``metadata_dir`` (any ``*.tsv`` file
+       containing both ``ted_id`` and ``chopping`` columns).
+
+    Also derives ``uniprot_id`` from a TED ID column when missing.
+
+    Returns the input DataFrame with the contract columns populated. Rows whose
+    chopping cannot be resolved are dropped with a warning.
+    """
+    cols = set(df.columns)
+
+    # Already in target form — nothing to do.
+    if {"domain1_chopping", "domain2_chopping"}.issubset(cols):
+        return df
+
+    # Schema B: explicit start/end columns.
+    if {"domain1_start", "domain1_end", "domain2_start", "domain2_end"}.issubset(cols):
+        df = df.copy()
+        df["domain1_chopping"] = (
+            df["domain1_start"].astype(int).astype(str)
+            + "-"
+            + df["domain1_end"].astype(int).astype(str)
+        )
+        df["domain2_chopping"] = (
+            df["domain2_start"].astype(int).astype(str)
+            + "-"
+            + df["domain2_end"].astype(int).astype(str)
+        )
+        return df
+
+    # Schema C: TED IDs + side-table lookup.
+    if {"ted_id1", "ted_id2"}.issubset(cols):
+        ted_lookup = _load_ted_domain_table(metadata_dir)
+        if ted_lookup is None:
+            msg = (
+                f"Found ted_id1/ted_id2 columns but no TED domain boundary table under "
+                f"{metadata_dir}. Expected a TSV containing 'ted_id' and 'chopping'."
+            )
+            raise FileNotFoundError(msg)
+        df = df.copy()
+        df["domain1_chopping"] = df["ted_id1"].map(ted_lookup)
+        df["domain2_chopping"] = df["ted_id2"].map(ted_lookup)
+        if "uniprot_id" not in cols:
+            df["uniprot_id"] = (
+                df["ted_id1"].astype(str).str.extract(_TED_ID_UNIPROT_RE.pattern)[0]
+            )
+        # Drop rows with unresolved choppings.
+        n_before = len(df)
+        df = df.dropna(subset=["domain1_chopping", "domain2_chopping"]).copy()
+        if len(df) < n_before:
+            logger.warning(
+                "Dropped %d rows lacking TED chopping entries", n_before - len(df)
+            )
+        return df
+
+    msg = (
+        "Cannot derive domain1_chopping/domain2_chopping from teddymer metadata. "
+        f"Columns present: {sorted(cols)}. Provide a metadata schema with one of: "
+        "(a) 'domain1_chopping'+'domain2_chopping', "
+        "(b) 'domain{1,2}_start'+'domain{1,2}_end', or "
+        "(c) 'ted_id1'+'ted_id2' with a TED domain table in the metadata directory."
+    )
+    raise ValueError(msg)
+
+
+def _load_ted_domain_table(metadata_dir: Path) -> dict[str, str] | None:
+    """Locate a TED domain boundary table and return ``{ted_id: chopping}``.
+
+    Searches ``metadata_dir`` recursively for any ``*.tsv``/``*.csv`` containing
+    both ``ted_id`` and ``chopping`` columns. Returns ``None`` if nothing is
+    found.
+    """
+    for path in metadata_dir.rglob("*.tsv"):
+        try:
+            head = pd.read_csv(path, sep="\t", nrows=0)
+        except (pd.errors.ParserError, UnicodeDecodeError):
+            continue
+        cols = {c.strip().lower() for c in head.columns}
+        if {"ted_id", "chopping"}.issubset(cols):
+            full = pd.read_csv(path, sep="\t")
+            full.columns = full.columns.str.strip().str.lower()
+            return dict(zip(full["ted_id"].astype(str), full["chopping"].astype(str), strict=False))
+    return None
+
+
 def filter_teddymer_clusters(
     metadata_dir: str | Path,
     output_path: str | Path,
@@ -77,11 +180,13 @@ def filter_teddymer_clusters(
     min_interface_plddt: float = DEFAULT_MIN_INTERFACE_PLDDT,
     max_interface_pae: float = DEFAULT_MAX_INTERFACE_PAE,
     min_interface_length: int = DEFAULT_MIN_INTERFACE_LENGTH,
+    require_chopping: bool = True,
 ) -> pd.DataFrame:
     """Filter teddymer cluster representatives by quality metrics.
 
-    Reads ``nonsingletonrep_metadata.tsv``, applies quality filters, and writes
-    a filtered manifest for downstream structure download and assembly.
+    Reads ``nonsingletonrep_metadata.tsv``, applies quality filters, derives the
+    ``domain1_chopping`` / ``domain2_chopping`` columns required by
+    :func:`chop_and_assemble_dimers`, and writes the filtered manifest.
 
     Args:
         metadata_dir: Directory containing extracted teddymer metadata.
@@ -89,6 +194,9 @@ def filter_teddymer_clusters(
         min_interface_plddt: Minimum interface pLDDT score.
         max_interface_pae: Maximum average interface PAE.
         min_interface_length: Minimum number of interface residues.
+        require_chopping: If True (default), raise when chopping columns
+            cannot be derived. Set False to keep this function usable as a
+            quality filter on metadata that lacks domain information.
 
     Returns:
         Filtered manifest as a DataFrame.
@@ -126,9 +234,18 @@ def filter_teddymer_clusters(
         100.0 * len(df) / max(n_before, 1),
     )
 
-    # Parse UniProt IDs and domain boundaries from the representative ID
-    # Format: AF-{UNIPROT}-F1-model_v4_{domain1_start}-{domain1_end}_{domain2_start}-{domain2_end}
-    # or similar — exact format depends on teddymer metadata columns
+    # Derive chopping columns required by chop_and_assemble_dimers.
+    try:
+        df = _derive_chopping_columns(df, metadata_dir)
+    except (ValueError, FileNotFoundError):
+        if require_chopping:
+            raise
+        logger.warning(
+            "Could not derive chopping columns from %s; manifest will lack "
+            "domain{1,2}_chopping and chop_and_assemble_dimers will fail.",
+            metadata_path,
+        )
+
     output_path.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(output_path, sep="\t", index=False)
     logger.info("Wrote filtered manifest to %s", output_path)
@@ -335,7 +452,13 @@ def chop_and_assemble_dimers(
     df = pd.read_csv(manifest_path, sep="\t")
     logger.info("Assembling %d dimers", len(df))
 
-    tasks: list[tuple[Path, str, str, Path]] = []
+    required = {"uniprot_id", "domain1_chopping", "domain2_chopping"}
+    missing = required.difference(df.columns)
+    if missing:
+        msg = f"Teddymer manifest missing columns required for assembly: {sorted(missing)}"
+        raise ValueError(msg)
+
+    tasks: list[tuple[Path, str, str, Path, pd.Series]] = []
     for _, row in df.iterrows():
         uniprot_id = row["uniprot_id"]
         afdb_path = afdb_dir / f"AF-{uniprot_id}-F1-model_v4.pdb"
@@ -344,17 +467,45 @@ def chop_and_assemble_dimers(
         output_path = output_dir / f"{row.name}.pdb"
         chop1 = str(row["domain1_chopping"])
         chop2 = str(row["domain2_chopping"])
-        tasks.append((afdb_path, chop1, chop2, output_path))
+        tasks.append((afdb_path, chop1, chop2, output_path, row))
 
     success = 0
+    manifest_records: list[dict[str, str | int]] = []
     with ProcessPoolExecutor(max_workers=workers) as pool:
-        futures = [pool.submit(_chop_and_assemble_one, *t) for t in tasks]
+        futures = [
+            (
+                pool.submit(_chop_and_assemble_one, afdb_path, chop1, chop2, output_path),
+                output_path,
+                row,
+            )
+            for afdb_path, chop1, chop2, output_path, row in tasks
+        ]
         with Progress() as progress:
             task_id = progress.add_task("Assembling dimers", total=len(futures))
-            for future in futures:
+            for future, output_path, row in futures:
                 if future.result():
                     success += 1
+                    source_id = str(
+                        row.get("cluster_rep", row.get("cluster_id", row.get("uniprot_id", row.name)))
+                    )
+                    manifest_records.append(
+                        {
+                            "structure_path": str(output_path),
+                            "chain_A": "A",
+                            "chain_B": "B",
+                            "source": "teddymer",
+                            "source_id": source_id,
+                            "split_group": source_id,
+                            "interface_residues": int(row.get("interfacelength", 0)),
+                        }
+                    )
                 progress.advance(task_id)
+
+    if manifest_records:
+        manifest = pd.DataFrame(manifest_records)
+        manifest_path = output_dir / "manifest.tsv"
+        manifest.to_csv(manifest_path, sep="\t", index=False)
+        logger.info("Wrote teddymer training manifest to %s", manifest_path)
 
     logger.info("Assembled %d / %d dimers", success, len(tasks))
     return success

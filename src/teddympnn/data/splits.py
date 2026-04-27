@@ -16,7 +16,15 @@ import pandas as pd
 logger = logging.getLogger(__name__)
 
 # Required manifest columns for training
-_MANIFEST_COLUMNS = ["structure_path", "chain_A", "chain_B", "source"]
+MANIFEST_COLUMNS: tuple[str, ...] = (
+    "structure_path",
+    "chain_A",
+    "chain_B",
+    "source",
+    "source_id",
+    "split_group",
+    "interface_residues",
+)
 
 
 # ---------------------------------------------------------------------------
@@ -215,8 +223,8 @@ def _normalize_to_training_manifest(
     """Normalize a source-specific DataFrame into the training manifest format.
 
     The training manifest requires columns: structure_path, chain_A, chain_B, source.
-    Source-specific DataFrames may have different column names or may need
-    defaults for missing chain columns.
+    Source-specific DataFrames may have different column names, but they must
+    identify both partner chain groups.
 
     Args:
         df: Source-specific DataFrame.
@@ -240,17 +248,53 @@ def _normalize_to_training_manifest(
         msg = f"No structure path column found in {source_name} manifest"
         raise ValueError(msg)
 
-    # Find chain columns (default to A/B if not present)
+    # Find chain columns.
     a_col = cols.get(chain_a_column.lower(), cols.get("chain_a"))
     b_col = cols.get(chain_b_column.lower(), cols.get("chain_b"))
+    if a_col is None or b_col is None:
+        msg = (
+            f"No partner chain columns found in {source_name} manifest; "
+            "expected chain_A and chain_B"
+        )
+        raise ValueError(msg)
+
+    source_id_col = None
+    for candidate in ["source_id", "cluster_rep", "cluster_id", "model_id", "pdb_id", "id"]:
+        if candidate in cols:
+            source_id_col = cols[candidate]
+            break
+
+    split_group_col = None
+    for candidate in ["split_group", "cluster_rep", "cluster_id", "model_id", "pdb_id"]:
+        if candidate in cols:
+            split_group_col = cols[candidate]
+            break
+
+    interface_col = None
+    for candidate in ["interface_residues", "interfacelength", "interface_length"]:
+        if candidate in cols:
+            interface_col = cols[candidate]
+            break
 
     result = pd.DataFrame()
     result["structure_path"] = df[path_col]
-    result["chain_A"] = df[a_col] if a_col else "A"
-    result["chain_B"] = df[b_col] if b_col else "B"
+    result["chain_A"] = df[a_col]
+    result["chain_B"] = df[b_col]
     result["source"] = source_name
+    if source_id_col is not None:
+        result["source_id"] = df[source_id_col].astype(str)
+    else:
+        result["source_id"] = [f"{source_name}_{i}" for i in range(len(df))]
+    if split_group_col is not None:
+        result["split_group"] = df[split_group_col].astype(str)
+    else:
+        result["split_group"] = result["source_id"]
+    if interface_col is not None:
+        result["interface_residues"] = df[interface_col].fillna(0).astype(int)
+    else:
+        result["interface_residues"] = 0
 
-    return result
+    return result[list(MANIFEST_COLUMNS)]
 
 
 def prepare_manifests(
@@ -262,10 +306,11 @@ def prepare_manifests(
     val_fraction: float = 0.05,
     seed: int = 42,
 ) -> tuple[Path, Path]:
-    """Prepare unified train/val manifests from all data sources.
+    """Prepare source-specific and aggregate train/val manifests.
 
-    Splits each source independently (respecting its grouping structure),
-    then concatenates the splits into unified train and val manifest TSVs.
+    Splits each source independently, writes source-specific files named
+    ``train_<source>.tsv`` and ``val_<source>.tsv``, then concatenates the
+    splits into aggregate ``train_manifest.tsv`` and ``val_manifest.tsv`` files.
 
     Args:
         output_dir: Directory to write output manifests.
@@ -283,25 +328,51 @@ def prepare_manifests(
 
     train_parts: list[pd.DataFrame] = []
     val_parts: list[pd.DataFrame] = []
+    source_paths: list[tuple[str, Path, Path, int, int]] = []
 
     if teddymer_manifest is not None:
         train_df, val_df = split_teddymer_manifest(
             teddymer_manifest, val_fraction=val_fraction, seed=seed
         )
-        train_parts.append(_normalize_to_training_manifest(train_df, "teddymer"))
-        val_parts.append(_normalize_to_training_manifest(val_df, "teddymer"))
+        train_norm = _normalize_to_training_manifest(train_df, "teddymer")
+        val_norm = _normalize_to_training_manifest(val_df, "teddymer")
+        train_parts.append(train_norm)
+        val_parts.append(val_norm)
+        train_source_path = output_dir / "train_teddymer.tsv"
+        val_source_path = output_dir / "val_teddymer.tsv"
+        train_norm.to_csv(train_source_path, sep="\t", index=False)
+        val_norm.to_csv(val_source_path, sep="\t", index=False)
+        source_paths.append(
+            ("teddymer", train_source_path, val_source_path, len(train_norm), len(val_norm))
+        )
 
     if nvidia_manifest is not None:
         train_df, val_df = split_nvidia_manifest(
             nvidia_manifest, val_fraction=val_fraction, seed=seed
         )
-        train_parts.append(_normalize_to_training_manifest(train_df, "nvidia"))
-        val_parts.append(_normalize_to_training_manifest(val_df, "nvidia"))
+        train_norm = _normalize_to_training_manifest(train_df, "nvidia")
+        val_norm = _normalize_to_training_manifest(val_df, "nvidia")
+        train_parts.append(train_norm)
+        val_parts.append(val_norm)
+        train_source_path = output_dir / "train_nvidia.tsv"
+        val_source_path = output_dir / "val_nvidia.tsv"
+        train_norm.to_csv(train_source_path, sep="\t", index=False)
+        val_norm.to_csv(val_source_path, sep="\t", index=False)
+        source_paths.append(
+            ("nvidia", train_source_path, val_source_path, len(train_norm), len(val_norm))
+        )
 
     if pdb_manifest is not None:
         train_df, val_df = split_pdb_manifest(pdb_manifest, val_fraction=val_fraction, seed=seed)
-        train_parts.append(_normalize_to_training_manifest(train_df, "pdb"))
-        val_parts.append(_normalize_to_training_manifest(val_df, "pdb"))
+        train_norm = _normalize_to_training_manifest(train_df, "pdb")
+        val_norm = _normalize_to_training_manifest(val_df, "pdb")
+        train_parts.append(train_norm)
+        val_parts.append(val_norm)
+        train_source_path = output_dir / "train_pdb.tsv"
+        val_source_path = output_dir / "val_pdb.tsv"
+        train_norm.to_csv(train_source_path, sep="\t", index=False)
+        val_norm.to_csv(val_source_path, sep="\t", index=False)
+        source_paths.append(("pdb", train_source_path, val_source_path, len(train_norm), len(val_norm)))
 
     if not train_parts:
         msg = "At least one data source manifest must be provided"
@@ -327,9 +398,7 @@ def prepare_manifests(
     # Write split statistics
     stats_path = output_dir / "split_stats.tsv"
     stats_rows = []
-    for source in train_manifest["source"].unique():
-        n_train = (train_manifest["source"] == source).sum()
-        n_val = (val_manifest["source"] == source).sum()
+    for source, train_source_path, val_source_path, n_train, n_val in source_paths:
         stats_rows.append(
             {
                 "source": source,
@@ -337,6 +406,8 @@ def prepare_manifests(
                 "n_val": n_val,
                 "total": n_train + n_val,
                 "val_pct": f"{100 * n_val / max(n_train + n_val, 1):.1f}%",
+                "train_manifest": str(train_source_path),
+                "val_manifest": str(val_source_path),
             }
         )
     pd.DataFrame(stats_rows).to_csv(stats_path, sep="\t", index=False)

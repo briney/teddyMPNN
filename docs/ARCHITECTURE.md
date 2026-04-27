@@ -23,7 +23,13 @@ shapes, token ordering, and feature ordering needed for transferable
 - Loading pretrained weights from Foundry checkpoints without conversion
 - Exporting fine-tuned checkpoints that Foundry users can load directly
 
-### ProteinMPNN (1.66M parameters)
+### ProteinMPNN (~1.66M parameters)
+
+> **Pending Foundry validation**: the current implementation produces 1,660,485
+> parameters; a 3,504-parameter divergence from the originally cited Foundry
+> figure (1,656,981). The discrepancy is not yet diagnosed and must be resolved
+> by loading reference Foundry weights with `strict=True` before Phase 5.
+
 
 ```
 ProteinMPNN (nn.Module)
@@ -90,7 +96,12 @@ inter-chain bucket at index 65. This fixes the input dimensionality of
 `embed_positional_features` and must remain stable for strict checkpoint
 compatibility.
 
-### LigandMPNN (2.62M parameters)
+### LigandMPNN (~2.62M parameters)
+
+> **Pending Foundry validation**: the current implementation produces 2,618,501
+> parameters; a 3,472-parameter divergence from the originally cited Foundry
+> figure (2,621,973). Resolve as part of the same pre-Phase-5 validation step.
+
 
 Extends ProteinMPNN with a protein-ligand context encoder that operates over
 three graphs:

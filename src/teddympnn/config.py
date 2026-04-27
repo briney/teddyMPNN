@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Literal
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class DataSourceConfig(BaseModel):
@@ -36,6 +36,7 @@ class TrainingConfig(BaseModel):
     model: ModelConfig = Field(default_factory=ModelConfig)
     pretrained_weights: Path
     data_sources: list[DataSourceConfig]
+    validation_data_sources: list[DataSourceConfig] = Field(default_factory=list)
     token_budget: int = 10_000
     max_residues: int = 6_000
     min_interface_contacts: int = 4
@@ -45,6 +46,9 @@ class TrainingConfig(BaseModel):
     grad_clip_max_norm: float | None = None
     structure_noise: float = 0.2
     label_smoothing: float = 0.1
+    atomize_partner_sidechains: bool = True
+    sidechain_atomization_probability: float = 0.5
+    sidechain_atomization_per_residue_probability: float = 0.02
     mixed_precision: bool = True
     gradient_checkpointing: bool = True
     num_workers: int = 8
@@ -54,6 +58,20 @@ class TrainingConfig(BaseModel):
     save_every_n_steps: int = 10_000
     output_dir: Path = Path("outputs")
     wandb_project: str | None = None
+
+    @model_validator(mode="after")
+    def apply_model_defaults(self) -> TrainingConfig:
+        """Apply model-specific training defaults when omitted in YAML."""
+        if self.model.model_type == "ligand_mpnn":
+            if self.model.num_neighbors == 48:
+                self.model.num_neighbors = 32
+            if self.token_budget == 10_000:
+                self.token_budget = 6_000
+            if self.structure_noise == 0.2:
+                self.structure_noise = 0.1
+            if self.grad_clip_max_norm is None:
+                self.grad_clip_max_norm = 1.0
+        return self
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> TrainingConfig:

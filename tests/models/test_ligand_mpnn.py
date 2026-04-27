@@ -84,9 +84,11 @@ class TestLigandMPNNArchitecture:
     def test_parameter_count(self) -> None:
         """Parameter count for default LigandMPNN configuration.
 
-        NOTE: exact match against Foundry checkpoints is verified in the
-        validation gate (tests/validation/). This test locks the count for
-        regression detection.
+        NOTE: This test locks the count produced by the current implementation
+        for regression detection only. The original architecture spec cited
+        2,621,973 (a 3,472-parameter divergence). Resolve by loading
+        Foundry-current weights with ``strict=True`` in the validation gate
+        (tests/validation/test_foundry_equivalence.py).
         """
         model = LigandMPNN()
         total_params = sum(p.numel() for p in model.parameters())
@@ -116,6 +118,66 @@ class TestLigandMPNNContext:
 
         # Context should make a non-zero contribution
         assert not torch.allclose(enc_with["h_V"], enc_without["h_V"], atol=1e-4)
+
+    def test_no_context_matches_backbone_encoder(self) -> None:
+        """With ``Y_m`` all False, the LigandMPNN encoder must add zero
+        context contribution and reproduce the backbone-only encoder output.
+
+        This is the regression for the analysis finding that empty/masked
+        ligand context was previously perturbing protein representations
+        (``max_abs_no_context_delta = 2.34``). Without this gate, ProteinMPNN
+        vs. LigandMPNN ablations aren't interpretable.
+        """
+        from teddympnn.models.protein_mpnn import ProteinMPNN
+
+        torch.manual_seed(0)
+        model = LigandMPNN(
+            hidden_dim=64, num_neighbors=8, num_encoder_layers=1, num_decoder_layers=1
+        )
+        model.eval()
+
+        B, L = 1, 10
+
+        def _features(n_atoms: int, valid: bool) -> dict[str, torch.Tensor]:
+            return {
+                "X": torch.randn(B, L, 4, 3),
+                "S": torch.randint(0, 21, (B, L)),
+                "R_idx": torch.arange(L).unsqueeze(0).expand(B, -1),
+                "chain_labels": torch.zeros(B, L, dtype=torch.long),
+                "residue_mask": torch.ones(B, L),
+                "designed_residue_mask": torch.ones(B, L),
+                "fixed_residue_mask": torch.zeros(B, L),
+                "Y": torch.randn(B, n_atoms, 3) if n_atoms else torch.zeros(B, 0, 3),
+                "Y_m": (torch.ones if valid else torch.zeros)(B, n_atoms),
+                "Y_t": torch.randint(0, 119, (B, n_atoms))
+                if n_atoms
+                else torch.zeros(B, 0, dtype=torch.long),
+            }
+
+        # Backbone reference: no ligand atoms at all.
+        feats_empty = _features(n_atoms=0, valid=True)
+        # Masked: ligand atoms exist but are entirely masked out.
+        feats_masked = _features(n_atoms=5, valid=False)
+        # Use the same backbone for both so encoder inputs are identical.
+        feats_masked["X"] = feats_empty["X"].clone()
+        feats_masked["S"] = feats_empty["S"].clone()
+
+        with torch.no_grad():
+            gf_empty = model._compute_graph_features(feats_empty)
+            enc_empty = model.encode(feats_empty, gf_empty)["h_V"]
+            backbone = ProteinMPNN.encode(model, feats_empty, gf_empty)["h_V"]
+            gf_masked = model._compute_graph_features(feats_masked)
+            enc_masked = model.encode(feats_masked, gf_masked)["h_V"]
+
+        # No ligand atoms ⇒ identical to backbone encoder (no context branch run).
+        assert torch.allclose(enc_empty, backbone, atol=1e-6)
+        # Masked ligand atoms ⇒ context branch zeroed via ``valid_context`` mask;
+        # output must match the backbone-only encoder bit-for-bit (single-precision).
+        assert torch.allclose(enc_masked, backbone, atol=1e-5), (
+            f"max_abs_no_context_delta = "
+            f"{(enc_masked - backbone).abs().max().item():.6f}; "
+            "empty ligand context must not perturb protein encoding."
+        )
 
 
 class TestLigandMPNNGradient:

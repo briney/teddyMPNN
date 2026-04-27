@@ -52,6 +52,7 @@ def teddymer(
 ) -> None:
     """Download and preprocess teddymer synthetic dimers."""
     from teddympnn.data.teddymer import (
+        chop_and_assemble_dimers,
         download_afdb_structures,
         download_teddymer_metadata,
         filter_teddymer_clusters,
@@ -67,6 +68,12 @@ def teddymer(
         min_interface_length=min_ifl,
     )
     download_afdb_structures(manifest_path, output / "afdb", workers=workers)
+    chop_and_assemble_dimers(
+        manifest_path,
+        output / "afdb",
+        output / "dimers",
+        workers=workers,
+    )
     typer.echo(f"Teddymer data prepared in {output}")
 
 
@@ -79,19 +86,24 @@ def nvidia_complexes(
 ) -> None:
     """Download and filter NVIDIA predicted complexes."""
     from teddympnn.data.nvidia_complexes import (
+        download_nvidia_chunks,
         download_nvidia_metadata,
+        extract_nvidia_structures,
         filter_nvidia_metadata,
     )
 
     csv_path = download_nvidia_metadata(output / "metadata")
+    manifest_path = output / "filtered_manifest.tsv"
     filter_nvidia_metadata(
         csv_path,
-        output / "filtered_manifest.tsv",
+        manifest_path,
         min_ipsae=min_ipsae,
         min_plddt=min_plddt,
         max_clashes=max_clashes,
     )
-    typer.echo(f"NVIDIA complexes metadata filtered in {output}")
+    download_nvidia_chunks(manifest_path, output / "chunks")
+    extract_nvidia_structures(manifest_path, output / "chunks", output / "structures")
+    typer.echo(f"NVIDIA complexes data prepared in {output}")
 
 
 @download_app.command("prepare-manifests")
@@ -118,6 +130,7 @@ def prepare_manifests_cmd(
     )
     typer.echo(f"Train manifest: {train_path}")
     typer.echo(f"Val manifest:   {val_path}")
+    typer.echo(f"Source manifests written to {output}")
 
 
 @download_app.command()
@@ -210,13 +223,13 @@ def recovery(
     from teddympnn.data.sampler import TokenBudgetBatchSampler
     from teddympnn.evaluation.sequence_recovery import compute_recovery
     from teddympnn.models import LigandMPNN, ProteinMPNN
-    from teddympnn.weights.io import load_checkpoint_bundle
+    from teddympnn.weights.io import load_model_weights
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     model_cls = LigandMPNN if model_type == "ligand_mpnn" else ProteinMPNN
     model = model_cls()
-    load_checkpoint_bundle(checkpoint, model, map_location=device)
+    load_model_weights(checkpoint, model, map_location=device)
     model = model.to(device)
 
     dataset = PPIDataset(data, include_ligand_atoms=(model_type == "ligand_mpnn"))
@@ -317,13 +330,13 @@ def ddg(
 
     from teddympnn.evaluation.skempi import evaluate_skempi
     from teddympnn.models import LigandMPNN, ProteinMPNN
-    from teddympnn.weights.io import load_checkpoint_bundle
+    from teddympnn.weights.io import load_model_weights
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     model_cls = LigandMPNN if model_type == "ligand_mpnn" else ProteinMPNN
     model = model_cls()
-    load_checkpoint_bundle(checkpoint, model, map_location=device)
+    load_model_weights(checkpoint, model, map_location=device)
     model = model.to(device)
 
     results = evaluate_skempi(
@@ -364,15 +377,20 @@ def score(
     """Score a structure with a trained model."""
     import torch
 
-    from teddympnn.data.features import derive_backbone, parse_structure
+    from teddympnn.data.features import (
+        derive_backbone,
+        extract_ligand_atoms,
+        extract_sidechain_atoms,
+        parse_structure,
+    )
     from teddympnn.models import LigandMPNN, ProteinMPNN
-    from teddympnn.weights.io import load_checkpoint_bundle
+    from teddympnn.weights.io import load_model_weights
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     model_cls = LigandMPNN if model_type == "ligand_mpnn" else ProteinMPNN
     model = model_cls()
-    load_checkpoint_bundle(checkpoint, model, map_location=device)
+    load_model_weights(checkpoint, model, map_location=device)
     model = model.to(device)
 
     features = parse_structure(pdb)
@@ -398,6 +416,24 @@ def score(
         "designed_residue_mask": designed.unsqueeze(0).to(device),
         "fixed_residue_mask": (~designed).unsqueeze(0).to(device),
     }
+    if model_type == "ligand_mpnn":
+        ligand = extract_ligand_atoms(pdb)
+        sidechains = extract_sidechain_atoms(
+            features["xyz_37"],
+            features["xyz_37_m"],
+            features["S"],
+            ~designed,
+        )
+        Y = ligand["Y"]
+        Y_m = ligand["Y_m"]
+        Y_t = ligand["Y_t"]
+        if sidechains["Y"].shape[0] > 0:
+            Y = torch.cat([Y, sidechains["Y"]], dim=0)
+            Y_m = torch.cat([Y_m, sidechains["Y_m"]], dim=0)
+            Y_t = torch.cat([Y_t, sidechains["Y_t"]], dim=0)
+        batch["Y"] = Y.unsqueeze(0).to(device)
+        batch["Y_m"] = Y_m.unsqueeze(0).to(device)
+        batch["Y_t"] = Y_t.unsqueeze(0).to(device)
 
     scores = []
     for _ in range(num_samples):

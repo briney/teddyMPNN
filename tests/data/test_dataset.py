@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import collections
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 import pytest
 import torch
+from torch.utils.data import Dataset
 
-from teddympnn.data.dataset import PPIDataset
+from teddympnn.data.dataset import MixedDataLoader, PPIDataset
 from teddympnn.models.tokens import NUM_ATOMS_37
 
 # Reference structures
@@ -161,3 +164,248 @@ class TestPPIDataset:
         ds = PPIDataset(manifest_with_1brs)
         assert len(ds.lengths) == len(ds)
         assert all(n > 0 for n in ds.lengths)
+
+
+class TestPerSourceManifestContract:
+    """Each source pipeline must produce manifests whose first item has
+    nonempty designed and fixed masks. This integration test stages the
+    1BRS reference under each of the three source labels and verifies the
+    dataset contract holds.
+    """
+
+    @pytest.fixture
+    def per_source_manifest(self, tmp_path: Path, requires_reference_structures) -> Path:
+        manifest_path = tmp_path / "manifest_per_source.tsv"
+        df = pd.DataFrame(
+            {
+                "structure_path": [str(PDB_1BRS), str(PDB_1BRS), str(PDB_1BRS)],
+                "chain_A": ["A", "A", "A"],
+                "chain_B": ["D", "D", "D"],
+                "source": ["teddymer", "nvidia", "pdb"],
+            }
+        )
+        df.to_csv(manifest_path, sep="\t", index=False)
+        return manifest_path
+
+    @pytest.mark.parametrize("source", ["teddymer", "nvidia", "pdb"])
+    def test_first_item_has_nonempty_partner_masks(
+        self,
+        per_source_manifest: Path,
+        source: str,
+    ):
+        ds = PPIDataset(
+            per_source_manifest,
+            min_interface_contacts=1,
+            source_filter=source,
+        )
+        assert len(ds) > 0, f"PPIDataset for source={source} produced 0 views"
+        item = ds[0]
+        assert item["designed_residue_mask"].sum() > 0
+        assert item["fixed_residue_mask"].sum() > 0
+        # Designed and fixed are disjoint partitions of the protein.
+        assert not (
+            item["designed_residue_mask"] & item["fixed_residue_mask"]
+        ).any()
+
+
+class _SyntheticSourceDataset(Dataset[dict[str, Any]]):
+    """Minimal Dataset for testing MixedDataLoader source weighting.
+
+    Exposes only the interface MixedDataLoader needs: ``__len__``, ``__getitem__``,
+    and a ``lengths`` property.
+    """
+
+    def __init__(self, source: str, n: int, length: int) -> None:
+        self.source = source
+        self.n = n
+        self.length = length
+
+    def __len__(self) -> int:
+        return self.n
+
+    def __getitem__(self, idx: int) -> dict[str, Any]:
+        return {"source": self.source, "idx": idx}
+
+    @property
+    def lengths(self) -> list[int]:
+        return [self.length] * self.n
+
+
+def _identity_collate(batch: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return batch
+
+
+class TestMixedDataLoaderWeighting:
+    """The active sampler must honor configured source weights."""
+
+    def test_observed_proportions_match_weights(self) -> None:
+        torch.manual_seed(0)
+        ds_a = _SyntheticSourceDataset("A", n=200, length=50)
+        ds_b = _SyntheticSourceDataset("B", n=200, length=50)
+
+        loader = MixedDataLoader(
+            datasets=[ds_a, ds_b],  # type: ignore[list-item]
+            weights=[0.8, 0.2],
+            token_budget=100,  # ~2 items/batch
+            num_workers=0,
+            collate_fn=_identity_collate,
+            shuffle=True,
+        )
+
+        counts: collections.Counter[str] = collections.Counter()
+        # Drain enough batches for the weighted choice to converge.
+        for batch in loader:
+            for item in batch:
+                counts[item["source"]] += 1
+
+        total = counts["A"] + counts["B"]
+        assert total > 0
+        proportion_a = counts["A"] / total
+        # 0.8 ± 0.07 gives plenty of slack for sampling noise on this batch count.
+        assert abs(proportion_a - 0.8) < 0.07, (
+            f"Expected proportion ≈0.8, got {proportion_a:.3f}"
+        )
+
+    def test_unweighted_round_robins_all_sources(self) -> None:
+        ds_a = _SyntheticSourceDataset("A", n=4, length=50)
+        ds_b = _SyntheticSourceDataset("B", n=4, length=50)
+
+        loader = MixedDataLoader(
+            datasets=[ds_a, ds_b],  # type: ignore[list-item]
+            weights=[0.5, 0.5],
+            token_budget=100,
+            num_workers=0,
+            collate_fn=_identity_collate,
+            shuffle=False,
+            weighted=False,
+        )
+        sources = {item["source"] for batch in loader for item in batch}
+        assert sources == {"A", "B"}
+
+    def test_set_epoch_changes_source_sequence(self) -> None:
+        ds_a = _SyntheticSourceDataset("A", n=20, length=50)
+        ds_b = _SyntheticSourceDataset("B", n=20, length=50)
+
+        loader = MixedDataLoader(
+            datasets=[ds_a, ds_b],  # type: ignore[list-item]
+            weights=[0.5, 0.5],
+            token_budget=100,
+            num_workers=0,
+            collate_fn=_identity_collate,
+            shuffle=True,
+        )
+
+        loader.set_epoch(0)
+        seq_a = [batch[0]["source"] for batch in loader]
+
+        loader.set_epoch(7)
+        seq_b = [batch[0]["source"] for batch in loader]
+
+        # The two epoch seeds should produce different source sequences.
+        assert seq_a != seq_b
+
+    def test_set_epoch_propagates_to_samplers(self) -> None:
+        ds_a = _SyntheticSourceDataset("A", n=4, length=50)
+        loader = MixedDataLoader(
+            datasets=[ds_a],  # type: ignore[list-item]
+            weights=[1.0],
+            token_budget=100,
+            num_workers=0,
+            collate_fn=_identity_collate,
+            shuffle=True,
+        )
+        loader.set_epoch(42)
+        # Inspect the underlying batch sampler.
+        sampler = loader._loaders[0].batch_sampler
+        assert sampler is not None
+        assert sampler._epoch == 42  # type: ignore[attr-defined]
+
+
+class TestMinInterfaceContactsFilter:
+    """``PPIDataset.min_interface_contacts`` must drop low-contact entries."""
+
+    def test_low_contact_rows_skipped(self, tmp_path: Path) -> None:
+        # Stand up a manifest with three rows but only one row claims enough
+        # interface contacts. We override metadata lookup so we don't need
+        # actual structures on disk.
+        rows = [
+            {
+                "structure_path": str(tmp_path / "fake_a.pdb"),
+                "chain_A": "A",
+                "chain_B": "B",
+                "source": "pdb",
+                "interface_residues": 1,  # below threshold
+            },
+            {
+                "structure_path": str(tmp_path / "fake_b.pdb"),
+                "chain_A": "A",
+                "chain_B": "B",
+                "source": "pdb",
+                "interface_residues": 10,  # above threshold
+            },
+            {
+                "structure_path": str(tmp_path / "fake_c.pdb"),
+                "chain_A": "A",
+                "chain_B": "B",
+                "source": "pdb",
+                "interface_residues": 0,  # below threshold
+            },
+        ]
+        for row in rows:
+            Path(row["structure_path"]).touch()
+        manifest_path = tmp_path / "manifest.tsv"
+        pd.DataFrame(rows).to_csv(manifest_path, sep="\t", index=False)
+
+        class StubbedDataset(PPIDataset):
+            def _get_structure_metadata(
+                self,
+                manifest_idx: int,
+                structure_path: Path,
+                row: pd.Series,
+            ) -> dict[str, Any]:
+                return {
+                    "num_residues": 50,
+                    "interface_residues": int(row["interface_residues"]),
+                    "chain_ids": ["A", "B"],
+                }
+
+        ds = StubbedDataset(manifest_path, min_interface_contacts=4)
+        # One structure passes, expanded to two partner-design views.
+        assert len(ds) == 2
+        # Confirm the surviving entry is the one with 10 contacts.
+        # Each view records (manifest_idx, design_chains, fixed_chains).
+        manifest_indices = {view[0] for view in ds._views}
+        assert manifest_indices == {1}
+
+    def test_threshold_zero_keeps_all(self, tmp_path: Path) -> None:
+        rows = [
+            {
+                "structure_path": str(tmp_path / f"fake_{i}.pdb"),
+                "chain_A": "A",
+                "chain_B": "B",
+                "source": "pdb",
+                "interface_residues": i,
+            }
+            for i in range(3)
+        ]
+        for row in rows:
+            Path(row["structure_path"]).touch()
+        manifest_path = tmp_path / "manifest.tsv"
+        pd.DataFrame(rows).to_csv(manifest_path, sep="\t", index=False)
+
+        class StubbedDataset(PPIDataset):
+            def _get_structure_metadata(
+                self,
+                manifest_idx: int,
+                structure_path: Path,
+                row: pd.Series,
+            ) -> dict[str, Any]:
+                return {
+                    "num_residues": 50,
+                    "interface_residues": int(row["interface_residues"]),
+                    "chain_ids": ["A", "B"],
+                }
+
+        ds = StubbedDataset(manifest_path, min_interface_contacts=0)
+        # All three structures × two views each.
+        assert len(ds) == 6

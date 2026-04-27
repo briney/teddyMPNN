@@ -12,19 +12,29 @@ model:
   num_context_atoms: 25
   dropout_rate: 0.1
 
-pretrained_weights: weights/v_32_010_25.pt
+pretrained_weights: weights/ligandmpnn_v_32_010_25.pt
 
 data_sources:
   - name: teddymer
     weight: 0.80
-    path: data/manifests/train_manifest.tsv
+    path: data/manifests/train_teddymer.tsv
     source_type: teddymer
   - name: pdb
     weight: 0.20
-    path: data/manifests/train_manifest.tsv
+    path: data/manifests/train_pdb.tsv
     source_type: pdb
 
-token_budget: 10000
+validation_data_sources:
+  - name: teddymer
+    weight: 0.80
+    path: data/manifests/val_teddymer.tsv
+    source_type: teddymer
+  - name: pdb
+    weight: 0.20
+    path: data/manifests/val_pdb.tsv
+    source_type: pdb
+
+token_budget: 6000
 max_residues: 6000
 min_interface_contacts: 4
 learning_rate_factor: 2.0
@@ -32,6 +42,7 @@ warmup_steps: 4000
 max_steps: 300000
 structure_noise: 0.10
 label_smoothing: 0.1
+grad_clip_max_norm: 1.0
 mixed_precision: true
 gradient_checkpointing: true
 num_workers: 8

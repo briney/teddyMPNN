@@ -249,7 +249,10 @@ decode_auto_regressive(...)
 
 **Tests:**
 - Forward pass with synthetic data: correct output shapes
-- Parameter count = 1,656,981 (match Foundry)
+- Parameter count = 1,660,485 (current implementation; differs by 3,504
+  parameters from the original 1,656,981 figure cited for Foundry. Resolve
+  during pre-Phase-5 Foundry equivalence validation by loading reference
+  weights with `strict=True`.)
 - Teacher forcing and autoregressive produce valid log-probs (sum to ≤ 0)
 - Gradient flows through all parameters
 - score() returns per-residue values in expected range
@@ -299,7 +302,10 @@ Note num_in differences from base DecLayers:
 
 **Tests:**
 - Forward pass with synthetic protein + ligand data: correct shapes
-- Parameter count = 2,621,973 (match Foundry)
+- Parameter count = 2,618,501 (current implementation; differs by 3,472
+  parameters from the original 2,621,973 figure cited for Foundry. Resolve
+  during pre-Phase-5 Foundry equivalence validation by loading reference
+  weights with `strict=True`.)
 - Context encoder actually modifies h_V (non-zero contribution)
 - With empty ligand context (Y_m all False), output matches ProteinMPNN behavior
 - Side-chain atomization masks are correct in train vs eval mode

@@ -11,10 +11,12 @@ from teddympnn.models.tokens import (
     legacy_to_current_token_permutation,
 )
 from teddympnn.weights.legacy import (
+    _drop_120th_atom_type,
     _rename_key_current_to_legacy,
     _rename_key_legacy_to_current,
     _reorder_rbf_weights,
     _reorder_token_weights,
+    _restore_120th_atom_type,
     convert_to_legacy,
 )
 
@@ -124,3 +126,73 @@ class TestConvertToLegacy:
                 assert torch.allclose(legacy_state[key], original[key], atol=1e-6), (
                     f"Roundtrip failed for {key}"
                 )
+
+
+class TestAtomType120thRoundtrip:
+    """Restore↔drop must round-trip the LigandMPNN 120th atom-type slot."""
+
+    def test_restore_inserts_zero_column(self) -> None:
+        state = OrderedDict()
+        state["graph_featurization_module.embed_atom_type_features.weight"] = torch.randn(
+            64, 146
+        )
+        state[
+            "graph_featurization_module.ligand_subgraph_node_embedding.weight"
+        ] = torch.randn(128, 146)
+
+        _restore_120th_atom_type(state)
+
+        for key in [
+            "graph_featurization_module.embed_atom_type_features.weight",
+            "graph_featurization_module.ligand_subgraph_node_embedding.weight",
+        ]:
+            assert state[key].shape[1] == 147
+            # The inserted column at index 119 must be zero.
+            assert torch.equal(
+                state[key][:, 119], torch.zeros(state[key].shape[0])
+            )
+
+    def test_drop_then_restore_is_identity_on_non_119(self) -> None:
+        """drop(restore(legacy)) recovers the original input columns
+        outside the dropped 119 slot.
+        """
+        legacy = OrderedDict()
+        # Build a legacy 147-wide weight where col 119 is non-zero.
+        w = torch.randn(64, 147)
+        legacy["graph_featurization_module.embed_atom_type_features.weight"] = w.clone()
+
+        _drop_120th_atom_type(legacy)
+        assert (
+            legacy["graph_featurization_module.embed_atom_type_features.weight"].shape[1]
+            == 146
+        )
+        _restore_120th_atom_type(legacy)
+        restored = legacy["graph_featurization_module.embed_atom_type_features.weight"]
+        assert restored.shape == w.shape
+        # Columns outside index 119 are preserved.
+        assert torch.equal(restored[:, :119], w[:, :119])
+        assert torch.equal(restored[:, 120:], w[:, 120:])
+        # Restored slot 119 is zero (the slot was discarded during drop).
+        assert torch.equal(restored[:, 119], torch.zeros(64))
+
+    def test_convert_to_legacy_restores_atom_type(self) -> None:
+        """``convert_to_legacy`` produces a state_dict with the legacy
+        147-wide atom-type weights.
+        """
+        state = OrderedDict()
+        state["graph_featurization_module.embed_atom_type_features.weight"] = torch.randn(
+            64, 146
+        )
+        state["graph_featurization_module.embed_atom_type_features.bias"] = torch.randn(64)
+        state[
+            "graph_featurization_module.ligand_subgraph_node_embedding.weight"
+        ] = torch.randn(128, 146)
+
+        legacy = convert_to_legacy(state)
+        # Keys are renamed by convert_to_legacy; locate them via the legacy schema.
+        type_key_candidates = [k for k in legacy if "type_linear" in k and k.endswith(".w")]
+        y_node_key_candidates = [k for k in legacy if "y_nodes" in k and k.endswith(".w")]
+        assert type_key_candidates, f"No legacy type_linear weight in {list(legacy)}"
+        assert y_node_key_candidates, f"No legacy y_nodes weight in {list(legacy)}"
+        assert legacy[type_key_candidates[0]].shape[1] == 147
+        assert legacy[y_node_key_candidates[0]].shape[1] == 147

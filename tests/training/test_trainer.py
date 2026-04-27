@@ -16,8 +16,11 @@ from teddympnn.training.trainer import Trainer
 
 def _make_batch(B: int = 2, L: int = 20, device: str = "cpu") -> dict[str, torch.Tensor]:
     """Create a synthetic batch for testing."""
+    xyz_37 = torch.randn(B, L, 37, 3, device=device)
     return {
-        "X": torch.randn(B, L, 4, 3, device=device),
+        "X": xyz_37[:, :, :4, :].clone(),
+        "xyz_37": xyz_37,
+        "xyz_37_m": torch.ones(B, L, 37, dtype=torch.bool, device=device),
         "S": torch.randint(0, 21, (B, L), device=device),
         "R_idx": torch.arange(L, device=device).unsqueeze(0).expand(B, -1),
         "chain_labels": torch.zeros(B, L, dtype=torch.long, device=device),

@@ -19,7 +19,7 @@ from rich.table import Table
 from teddympnn.evaluation.sequence_recovery import RecoveryResults, compute_recovery
 from teddympnn.evaluation.skempi import SKEMPIResults, evaluate_skempi
 from teddympnn.models import LigandMPNN, ProteinMPNN
-from teddympnn.weights.io import load_checkpoint_bundle
+from teddympnn.weights.io import load_model_weights
 
 logger = logging.getLogger(__name__)
 
@@ -118,7 +118,7 @@ def _load_model(
     """
     model_cls = LigandMPNN if spec.model_type == "ligand_mpnn" else ProteinMPNN
     model = model_cls()
-    load_checkpoint_bundle(spec.checkpoint, model, map_location=device)
+    load_model_weights(spec.checkpoint, model, map_location=device)
     model = model.to(device).eval()
     return model
 

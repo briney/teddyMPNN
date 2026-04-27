@@ -496,15 +496,15 @@ def extract_sidechain_atoms(
     Returns:
         Dict with ``Y``, ``Y_m``, ``Y_t`` tensors for side-chain atoms.
     """
-    # Side-chain atom indices: 4 (CB) through 36 (OXT)
-    sc_indices = list(range(4, NUM_ATOMS_37))
+    # Side-chain atom indices: 4 (CB) through 35 (NZ), excluding terminal OXT.
+    sc_indices = list(range(4, NUM_ATOMS_37 - 1))
 
     # Gather side-chain coords and masks for selected residues
     selected = mask.bool()
-    sc_coords = xyz_37[selected][:, sc_indices, :]  # (M, 33, 3)
-    sc_mask = xyz_37_m[selected][:, sc_indices]  # (M, 33)
+    sc_coords = xyz_37[selected][:, sc_indices, :]  # (M, 32, 3)
+    sc_mask = xyz_37_m[selected][:, sc_indices]  # (M, 32)
 
-    # Flatten to (M*33, 3) and filter valid atoms
+    # Flatten to (M*32, 3) and filter valid atoms
     flat_coords = sc_coords.reshape(-1, 3)
     flat_mask = sc_mask.reshape(-1)
 
@@ -517,15 +517,15 @@ def extract_sidechain_atoms(
         }
 
     # Map side-chain atom names to element types
-    # ATOM_ORDER[4:37] = CB, CG, CG1, ... OXT — extract element from first char
-    sc_atom_names = ATOM_ORDER[4:]
+    # ATOM_ORDER[4:36] = CB, CG, CG1, ... NZ — extract element from first char
+    sc_atom_names = ATOM_ORDER[4:-1]
     sc_element_indices: list[int] = []
     for name in sc_atom_names:
         elem = name[0].upper()  # C, N, O, S from atom names
         sc_element_indices.append(element_to_idx.get(elem, UNK_ELEMENT_IDX))
     elem_per_atom = torch.tensor(sc_element_indices, dtype=torch.long)
 
-    # Tile for all selected residues: (M, 33) → (M*33,)
+    # Tile for all selected residues: (M, 32) → (M*32,)
     num_selected = int(selected.sum().item())
     flat_types = elem_per_atom.unsqueeze(0).expand(num_selected, -1).reshape(-1)
 

@@ -138,6 +138,51 @@ def load_checkpoint_bundle(
     return dict(bundle)
 
 
+def load_model_weights(
+    path: str | Path,
+    model: nn.Module,
+    strict: bool = True,
+    map_location: str | torch.device = "cpu",
+) -> dict[str, Any]:
+    """Load model weights from any supported teddyMPNN-compatible format.
+
+    Supported formats:
+
+    - native teddyMPNN bundle with ``format_version == teddympnn.v1``
+    - Foundry-current checkpoint with a ``model`` key
+    - legacy dauparas/IPD checkpoint with ``model_state_dict`` or raw state dict
+
+    Args:
+        path: Checkpoint path.
+        model: Model to load into.
+        strict: Whether to require exact key matching for native/Foundry formats.
+        map_location: Device mapping.
+
+    Returns:
+        Loaded checkpoint metadata.
+    """
+    from teddympnn.weights.foundry import load_foundry_checkpoint
+    from teddympnn.weights.legacy import load_legacy_weights
+
+    path = Path(path)
+    checkpoint = torch.load(path, map_location=map_location, weights_only=False)
+
+    if isinstance(checkpoint, dict) and checkpoint.get("format_version") == FORMAT_VERSION:
+        model.load_state_dict(checkpoint["state_dict"], strict=strict)
+        logger.info("Loaded native teddyMPNN checkpoint from %s", path)
+        return dict(checkpoint)
+
+    if isinstance(checkpoint, dict) and "model" in checkpoint:
+        return load_foundry_checkpoint(
+            path=path,
+            model=model,
+            strict=strict,
+            map_location=map_location,
+        )
+
+    return load_legacy_weights(path=path, model=model, map_location=map_location)
+
+
 def download_pretrained(
     model_type: str,
     noise_level: str,

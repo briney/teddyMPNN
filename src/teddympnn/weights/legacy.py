@@ -194,6 +194,35 @@ def _drop_120th_atom_type(
             state_dict[key] = torch.cat([tensor[:, :119], tensor[:, 120:]], dim=1)
 
 
+def _restore_120th_atom_type(
+    state_dict: OrderedDict[str, torch.Tensor],
+) -> None:
+    """Inverse of :func:`_drop_120th_atom_type`.
+
+    Re-inserts a zero column at index 119 in the input dimension of the
+    atom-type-embedding weights so the resulting shape matches the legacy
+    120-atom-type vocabulary expected by dauparas/LigandMPNN.
+    """
+    keys_to_check = [
+        "graph_featurization_module.embed_atom_type_features.weight",
+        "graph_featurization_module.ligand_subgraph_node_embedding.weight",
+    ]
+    for key in keys_to_check:
+        if key not in state_dict:
+            continue
+        tensor = state_dict[key]
+        # Current input is [119 element + 19 group + 8 period] = 146.
+        # Legacy input is [120 element + 19 group + 8 period] = 147.
+        if tensor.shape[1] != 146:
+            continue
+        zero_col = torch.zeros(
+            tensor.shape[0], 1, dtype=tensor.dtype, device=tensor.device
+        )
+        state_dict[key] = torch.cat(
+            [tensor[:, :119], zero_col, tensor[:, 119:]], dim=1
+        )
+
+
 def load_legacy_weights(
     path: str | Path,
     model: nn.Module,
@@ -259,9 +288,10 @@ def convert_to_legacy(state_dict: dict[str, torch.Tensor]) -> OrderedDict[str, t
     """Convert current state_dict to legacy format for export.
 
     Applies reverse transformations:
-    1. Reorder tokens back to 1-letter alphabetical
-    2. Reorder RBF pairs back to same-atom-first
-    3. Rename keys to legacy naming
+    1. Reorder tokens back to 1-letter alphabetical.
+    2. Reorder RBF pairs back to same-atom-first.
+    3. Restore the 120th atom-type slot (LigandMPNN only).
+    4. Rename keys to legacy naming.
 
     Args:
         state_dict: Current-format state_dict.
@@ -278,6 +308,9 @@ def convert_to_legacy(state_dict: dict[str, torch.Tensor]) -> OrderedDict[str, t
     # Reverse RBF ordering
     rbf_perm = current_to_legacy_rbf_permutation()
     _reorder_rbf_weights(legacy, rbf_perm)
+
+    # Restore dropped 120th atom type for LigandMPNN exports.
+    _restore_120th_atom_type(legacy)
 
     # Rename keys
     final = OrderedDict()

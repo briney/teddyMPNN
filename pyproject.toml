@@ -70,6 +70,9 @@ select = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra -q"
+markers = [
+    "slow: marks tests that require GPU, pretrained weights, or long runtime",
+]
 
 [tool.mypy]
 python_version = "3.11"

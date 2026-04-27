@@ -7,19 +7,23 @@ gradient checkpointing, and Noam LR scheduling.
 from __future__ import annotations
 
 import logging
+import os
 import random
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import torch
+import torch.distributed as dist
 from torch import nn
+from torch.nn.parallel import DistributedDataParallel
 from torch.nn.utils import clip_grad_norm_
 
+from teddympnn.data.features import identify_interface_residues
 from teddympnn.models import LigandMPNN, ProteinMPNN
 from teddympnn.training.loss import LabelSmoothedNLLLoss
 from teddympnn.training.scheduler import NoamScheduler
-from teddympnn.weights.io import load_checkpoint_bundle, save_checkpoint_bundle
+from teddympnn.weights.io import load_checkpoint_bundle, load_model_weights, save_checkpoint_bundle
 
 if TYPE_CHECKING:
     from torch.utils.data import DataLoader
@@ -56,22 +60,43 @@ class Trainer:
         self,
         config: TrainingConfig,
         model: ProteinMPNN | LigandMPNN,
-        train_loader: DataLoader[dict[str, Any]],
-        val_loader: DataLoader[dict[str, Any]] | None = None,
+        train_loader: DataLoader[dict[str, Any]] | Any,
+        val_loader: DataLoader[dict[str, Any]] | Any | None = None,
         device: torch.device | None = None,
     ) -> None:
         self.config = config
-        self.device = device or (
-            torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-        )
-        self.model = model.to(self.device)
+        self.rank = int(os.environ.get("RANK", "0"))
+        self.local_rank = int(os.environ.get("LOCAL_RANK", "0"))
+        self.world_size = int(os.environ.get("WORLD_SIZE", "1"))
+        self.is_distributed = self.world_size > 1
+        if self.is_distributed and not dist.is_initialized():
+            backend = "nccl" if torch.cuda.is_available() else "gloo"
+            dist.init_process_group(backend=backend)
+
+        if device is not None:
+            self.device = device
+        elif torch.cuda.is_available():
+            self.device = torch.device("cuda", self.local_rank)
+            torch.cuda.set_device(self.device)
+        else:
+            self.device = torch.device("cpu")
 
         # Enable gradient checkpointing if configured
         if config.gradient_checkpointing:
-            self.model.use_gradient_checkpointing = True
+            model.use_gradient_checkpointing = True
 
         # Set structure noise from config
-        self.model.augment_eps = config.structure_noise
+        model.augment_eps = config.structure_noise
+        self.model: nn.Module = model.to(self.device)
+        if self.is_distributed:
+            if self.device.type == "cuda":
+                self.model = DistributedDataParallel(
+                    self.model,
+                    device_ids=[self.local_rank],
+                    output_device=self.local_rank,
+                )
+            else:
+                self.model = DistributedDataParallel(self.model)
 
         # Loss function
         self.loss_fn = LabelSmoothedNLLLoss(
@@ -79,7 +104,12 @@ class Trainer:
         )
 
         # Optimizer
-        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=1.0)
+        self.optimizer = torch.optim.Adam(
+            self.model.parameters(),
+            lr=1.0,
+            betas=(0.9, 0.98),
+            eps=1e-9,
+        )
 
         # Scheduler
         self.scheduler = NoamScheduler(
@@ -119,22 +149,25 @@ class Trainer:
         from teddympnn.data.dataset import MixedDataLoader, PPIDataset
 
         _seed_everything(config.seed)
+        rank = int(os.environ.get("RANK", "0"))
+        world_size = int(os.environ.get("WORLD_SIZE", "1"))
 
         # Build model
         is_ligand = config.model.model_type == "ligand_mpnn"
         model_cls = LigandMPNN if is_ligand else ProteinMPNN
-        model = model_cls(
-            hidden_dim=config.model.hidden_dim,
-            num_encoder_layers=config.model.num_encoder_layers,
-            num_decoder_layers=config.model.num_decoder_layers,
-            num_neighbors=config.model.num_neighbors,
-            dropout=config.model.dropout_rate,
-        )
+        model_kwargs: dict[str, Any] = {
+            "hidden_dim": config.model.hidden_dim,
+            "num_encoder_layers": config.model.num_encoder_layers,
+            "num_decoder_layers": config.model.num_decoder_layers,
+            "num_neighbors": config.model.num_neighbors,
+            "dropout": config.model.dropout_rate,
+        }
+        if is_ligand:
+            model_kwargs["num_context_atoms"] = config.model.num_context_atoms
+        model = model_cls(**model_kwargs)
 
         # Load pretrained weights
-        from teddympnn.weights.legacy import load_legacy_weights
-
-        load_legacy_weights(config.pretrained_weights, model)
+        load_model_weights(config.pretrained_weights, model)
         logger.info("Loaded pretrained weights from %s", config.pretrained_weights)
 
         # Build datasets
@@ -147,6 +180,11 @@ class Trainer:
                 max_residues=config.max_residues,
                 min_interface_contacts=config.min_interface_contacts,
                 include_ligand_atoms=is_ligand,
+                atomize_partner_sidechains=is_ligand and config.atomize_partner_sidechains,
+                sidechain_atomization_probability=config.sidechain_atomization_probability,
+                sidechain_atomization_per_residue_probability=(
+                    config.sidechain_atomization_per_residue_probability
+                ),
             )
             datasets.append(ds)
             weights.append(src.weight)
@@ -157,12 +195,50 @@ class Trainer:
             token_budget=config.token_budget,
             num_workers=config.num_workers,
             collate_fn=collator,
+            weighted=True,
+            rank=rank,
+            world_size=world_size,
         )
+
+        val_loader = None
+        if config.validation_data_sources:
+            val_datasets = []
+            val_weights = []
+            for src in config.validation_data_sources:
+                ds = PPIDataset(
+                    manifest_path=src.path,
+                    max_residues=config.max_residues,
+                    min_interface_contacts=config.min_interface_contacts,
+                    include_ligand_atoms=is_ligand,
+                    atomize_partner_sidechains=is_ligand and config.atomize_partner_sidechains,
+                    sidechain_atomization_probability=1.0,
+                    sidechain_atomization_per_residue_probability=1.0,
+                )
+                val_datasets.append(ds)
+                val_weights.append(src.weight)
+            val_loader = MixedDataLoader(
+                datasets=val_datasets,
+                weights=val_weights,
+                token_budget=config.token_budget,
+                num_workers=config.num_workers,
+                collate_fn=collator,
+                shuffle=False,
+                weighted=False,
+                rank=rank,
+                world_size=world_size,
+            )
+        elif config.eval_every_n_steps and config.eval_every_n_steps < config.max_steps:
+            logger.warning(
+                "eval_every_n_steps=%d is set but no validation_data_sources are "
+                "configured; validation will be skipped.",
+                config.eval_every_n_steps,
+            )
 
         return cls(
             config=config,
             model=model,
             train_loader=train_loader,  # type: ignore[arg-type]
+            val_loader=val_loader,  # type: ignore[arg-type]
         )
 
     def _init_wandb(self) -> None:
@@ -182,7 +258,8 @@ class Trainer:
     def _log_metrics(self, metrics: dict[str, float], step: int) -> None:
         """Log metrics to console and wandb."""
         parts = [f"{k}={v:.4f}" for k, v in metrics.items()]
-        logger.info("step %d: %s", step, ", ".join(parts))
+        if self.rank == 0:
+            logger.info("step %d: %s", step, ", ".join(parts))
 
         if self._wandb_run is not None:
             import wandb
@@ -267,6 +344,43 @@ class Trainer:
             total_correct += correct.sum().item()
             total_designed += designed_mask.sum().item()
 
+            B = preds.shape[0]
+            for b in range(B):
+                res_mask = batch["residue_mask"][b].bool()
+                designed = designed_mask[b] & res_mask
+                if not designed.any():
+                    continue
+                interface = identify_interface_residues(
+                    batch["xyz_37"][b][res_mask],
+                    batch["xyz_37_m"][b][res_mask],
+                    batch["chain_labels"][b][res_mask],
+                )
+                full_interface = torch.zeros_like(res_mask)
+                full_interface[res_mask] = interface
+                designed_interface = designed & full_interface
+                total_iface_correct += ((preds[b] == batch["S"][b]) & designed_interface).sum().item()
+                total_iface += designed_interface.sum().item()
+
+        if self.is_distributed:
+            stats = torch.tensor(
+                [
+                    total_loss,
+                    float(n_batches),
+                    float(total_correct),
+                    float(total_designed),
+                    float(total_iface_correct),
+                    float(total_iface),
+                ],
+                device=self.device,
+            )
+            dist.all_reduce(stats, op=dist.ReduceOp.SUM)
+            total_loss = float(stats[0].item())
+            n_batches = int(stats[1].item())
+            total_correct = int(stats[2].item())
+            total_designed = int(stats[3].item())
+            total_iface_correct = int(stats[4].item())
+            total_iface = int(stats[5].item())
+
         metrics: dict[str, float] = {}
         if n_batches > 0:
             metrics["val_loss"] = total_loss / n_batches
@@ -287,6 +401,8 @@ class Trainer:
             Path to the saved checkpoint.
         """
         output_dir = Path(self.config.output_dir) / "checkpoints"
+        if self.rank != 0:
+            return output_dir / f"step_{step:07d}.pt"
         output_dir.mkdir(parents=True, exist_ok=True)
         path = output_dir / f"step_{step:07d}.pt"
 
@@ -329,15 +445,21 @@ class Trainer:
     def train(self) -> None:
         """Run the full training loop."""
         _seed_everything(self.config.seed)
-        self._init_wandb()
+        if self.rank == 0:
+            self._init_wandb()
 
-        logger.info(
-            "Starting training: max_steps=%d, device=%s, amp=%s",
-            self.config.max_steps,
-            self.device,
-            self.use_amp,
-        )
+        if self.rank == 0:
+            logger.info(
+                "Starting training: max_steps=%d, device=%s, amp=%s, world_size=%d",
+                self.config.max_steps,
+                self.device,
+                self.use_amp,
+                self.world_size,
+            )
 
+        epoch = 0
+        if hasattr(self.train_loader, "set_epoch"):
+            self.train_loader.set_epoch(epoch)
         data_iter = iter(self.train_loader)
 
         while self.global_step < self.config.max_steps:
@@ -345,6 +467,9 @@ class Trainer:
             try:
                 batch = next(data_iter)
             except StopIteration:
+                epoch += 1
+                if hasattr(self.train_loader, "set_epoch"):
+                    self.train_loader.set_epoch(epoch)
                 data_iter = iter(self.train_loader)
                 batch = next(data_iter)
 
@@ -374,9 +499,12 @@ class Trainer:
 
         # Final checkpoint
         self.save_checkpoint(self.global_step)
-        logger.info("Training complete at step %d", self.global_step)
+        if self.rank == 0:
+            logger.info("Training complete at step %d", self.global_step)
 
         if self._wandb_run is not None:
             import wandb
 
             wandb.finish()
+        if self.is_distributed:
+            dist.barrier()

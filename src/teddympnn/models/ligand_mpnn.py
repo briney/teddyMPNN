@@ -56,6 +56,7 @@ class LigandMPNN(ProteinMPNN):
         num_positional_embeddings: int = 16,
         num_rbf: int = 16,
         max_relative_feature: int = 32,
+        num_context_atoms: int = 25,
         num_context_encoder_layers: int = 2,
         num_ligand_encoder_layers: int = 2,
         use_gradient_checkpointing: bool = False,
@@ -82,6 +83,7 @@ class LigandMPNN(ProteinMPNN):
             hidden_dim=hidden_dim,
             max_relative_feature=max_relative_feature,
             dropout=dropout,
+            num_context_atoms=num_context_atoms,
         )
 
         # Ligand context embedding projections
@@ -159,6 +161,7 @@ class LigandMPNN(ProteinMPNN):
         ligand_edges = graph_features["ligand_subgraph_edges"]
         Y_m_context = graph_features["ligand_subgraph_Y_m"]
         Y_m_edges = graph_features["ligand_subgraph_Y_m_edges"]
+        valid_context = Y_m_context.bool().any(dim=-1).float().unsqueeze(-1)
 
         # Embed ligand features
         h_E_p2l = self.W_protein_to_ligand_edges_embed(E_protein_to_ligand)
@@ -227,6 +230,7 @@ class LigandMPNN(ProteinMPNN):
         context_contribution = self.final_context_norm(
             self.graph_featurization_module.dropout(self.W_final_context_embed(h_V_context))
         )
+        context_contribution = context_contribution * valid_context
         h_V = h_V + context_contribution
 
         return {"h_V": h_V, "h_E": h_E}

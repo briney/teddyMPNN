@@ -11,6 +11,7 @@ import logging
 from pathlib import Path
 
 import pandas as pd
+import torch
 from rich.progress import Progress
 
 logger = logging.getLogger(__name__)
@@ -83,6 +84,38 @@ _SEARCH_QUERY_TEMPLATE = {
         "return_all_hits": True,
     },
 }
+
+
+def _best_interacting_chain_pair(
+    parsed: dict[str, object],
+    *,
+    interface_distance: float,
+) -> tuple[str, str, int] | None:
+    """Find the chain pair with the largest number of interface residues."""
+    chain_ids = parsed["chain_ids"]
+    assert isinstance(chain_ids, list)
+    unique_chain_ids = sorted(set(str(c) for c in chain_ids))
+    if len(unique_chain_ids) < 2:
+        return None
+
+    from teddympnn.data.features import identify_interface_residues
+
+    best: tuple[str, str, int] | None = None
+    for i, chain_a in enumerate(unique_chain_ids):
+        for chain_b in unique_chain_ids[i + 1 :]:
+            pair_mask = torch.tensor([cid in {chain_a, chain_b} for cid in chain_ids])
+            if pair_mask.sum().item() == 0:
+                continue
+            pair_interface = identify_interface_residues(
+                parsed["xyz_37"][pair_mask],
+                parsed["xyz_37_m"][pair_mask],
+                parsed["chain_labels"][pair_mask],
+                distance_cutoff=interface_distance,
+            )
+            n_interface = int(pair_interface.sum().item())
+            if best is None or n_interface > best[2]:
+                best = (chain_a, chain_b, n_interface)
+    return best
 
 
 # ---------------------------------------------------------------------------
@@ -203,7 +236,7 @@ def download_pdb_structures(
     logger.info("Downloaded %d / %d structures", len(downloaded), len(pdb_ids))
 
     # Filter for interface contacts
-    from teddympnn.data.features import identify_interface_residues, parse_structure
+    from teddympnn.data.features import parse_structure
 
     records: list[dict[str, str | int]] = []
     for pdb_id in downloaded:
@@ -215,18 +248,23 @@ def download_pdb_structures(
             if n_chains < 2:
                 continue
 
-            interface = identify_interface_residues(
-                parsed["xyz_37"],
-                parsed["xyz_37_m"],
-                chain_labels,
-                distance_cutoff=interface_distance,
+            best_pair = _best_interacting_chain_pair(
+                parsed,
+                interface_distance=interface_distance,
             )
-            n_contacts = int(interface.sum().item())
+            if best_pair is None:
+                continue
+            chain_a, chain_b, n_contacts = best_pair
             if n_contacts >= min_interface_contacts:
                 records.append(
                     {
                         "pdb_id": pdb_id,
                         "structure_path": str(cif_path),
+                        "chain_A": chain_a,
+                        "chain_B": chain_b,
+                        "source": "pdb",
+                        "source_id": pdb_id,
+                        "split_group": pdb_id,
                         "num_chains": n_chains,
                         "interface_residues": n_contacts,
                     }
