@@ -438,8 +438,11 @@ class ProteinMPNN(nn.Module):
 
         Args:
             input_features: Batch dict.
-            score_mask: Optional mask for which residues to score. If None,
-                scores all residues marked in ``designed_residue_mask``.
+            score_mask: Optional float mask, shape ``(B, L)``. If provided,
+                returned log-probabilities are multiplied by this mask (e.g.
+                pass ``designed_residue_mask`` to zero out fixed positions).
+                If ``None``, log-probabilities for every residue are returned
+                unmasked.
             temperature: Softmax temperature.
 
         Returns:

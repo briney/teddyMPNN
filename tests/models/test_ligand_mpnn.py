@@ -77,6 +77,27 @@ class TestLigandMPNNArchitecture:
         model = LigandMPNN()
         assert model.num_neighbors == 32
 
+    def test_num_context_atoms_propagates(self) -> None:
+        """``num_context_atoms`` reaches the graph featurization module.
+
+        Regression: ``ModelConfig.num_context_atoms`` was previously dropped
+        before reaching ``ProteinFeaturesLigand``, leaving the module-level
+        default in place regardless of config. This test exercises the same
+        kwargs path that ``Trainer.from_config`` uses.
+        """
+        from teddympnn.config import ModelConfig
+
+        cfg = ModelConfig(model_type="ligand_mpnn", num_context_atoms=16)
+        model = LigandMPNN(
+            hidden_dim=cfg.hidden_dim,
+            num_encoder_layers=cfg.num_encoder_layers,
+            num_decoder_layers=cfg.num_decoder_layers,
+            num_neighbors=cfg.num_neighbors,
+            dropout=cfg.dropout_rate,
+            num_context_atoms=cfg.num_context_atoms,
+        )
+        assert model.graph_featurization_module.num_context_atoms == 16
+
     def test_final_context_no_bias(self) -> None:
         model = LigandMPNN()
         assert model.W_final_context_embed.bias is None

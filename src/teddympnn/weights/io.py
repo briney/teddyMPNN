@@ -85,7 +85,7 @@ def save_checkpoint_bundle(
     if optimizer is not None:
         bundle["optimizer"] = optimizer.state_dict()
     if scheduler is not None:
-        bundle["scheduler"] = scheduler.state_dict()
+        bundle["scheduler"] = scheduler.state_dict()  # type: ignore[no-untyped-call]
 
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)

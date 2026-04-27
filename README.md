@@ -21,6 +21,10 @@ cd teddympnn
 pip install -e ".[dev,data,train]"
 ```
 
+The editable install is required before running `pytest`, `mypy`, or the
+`teddympnn` CLI from a checkout — the test suite imports the installed
+`teddympnn` package, not the `src/` directory.
+
 ## Quick Start
 
 ### Score a structure

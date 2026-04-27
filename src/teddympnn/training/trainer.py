@@ -237,8 +237,8 @@ class Trainer:
         return cls(
             config=config,
             model=model,
-            train_loader=train_loader,  # type: ignore[arg-type]
-            val_loader=val_loader,  # type: ignore[arg-type]
+            train_loader=train_loader,
+            val_loader=val_loader,
         )
 
     def _init_wandb(self) -> None:

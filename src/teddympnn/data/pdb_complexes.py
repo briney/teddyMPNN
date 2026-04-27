@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 import torch
@@ -87,7 +88,7 @@ _SEARCH_QUERY_TEMPLATE = {
 
 
 def _best_interacting_chain_pair(
-    parsed: dict[str, object],
+    parsed: dict[str, Any],
     *,
     interface_distance: float,
 ) -> tuple[str, str, int] | None:

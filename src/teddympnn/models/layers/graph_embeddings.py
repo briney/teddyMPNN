@@ -371,6 +371,7 @@ def compute_knn(
 
     # Top-k nearest (smallest distances)
     _, E_idx = dist_sq.topk(k, dim=-1, largest=False)
+    assert isinstance(E_idx, torch.Tensor)
     return E_idx
 
 
