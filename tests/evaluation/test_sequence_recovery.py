@@ -156,3 +156,30 @@ class TestComputeRecovery:
 
         assert results.n_structures == 0
         assert results.n_designed_residues == 0
+
+    def test_per_source_stratification(self) -> None:
+        """When ``source`` is provided, recovery is reported per source."""
+        model = _PerfectModel(hidden_dim=32, num_encoder_layers=1, num_decoder_layers=1)
+        # Manually stamp each batch with mixed sources so the loader carries
+        # the metadata field that compute_recovery now consumes.
+        batches = []
+        for i in range(4):
+            b = _make_batch(B=2, L=20)
+            b["source"] = ["teddymer", "nvidia"] if i % 2 == 0 else ["pdb", "teddymer"]
+            batches.append(b)
+        loader = DataLoader(batches, batch_size=None)
+
+        results = compute_recovery(model, loader, device=torch.device("cpu"))
+
+        assert set(results.per_source_overall) == {"teddymer", "nvidia", "pdb"}
+        # Perfect model → every per-source overall recovery is 1.0
+        for value in results.per_source_overall.values():
+            assert value == 1.0
+
+    def test_no_source_field_leaves_per_source_empty(self) -> None:
+        """If batches lack ``source``, per-source dicts stay empty."""
+        model = _PerfectModel(hidden_dim=32, num_encoder_layers=1, num_decoder_layers=1)
+        loader = _make_loader(n_batches=2, B=2, L=20)
+        results = compute_recovery(model, loader, device=torch.device("cpu"))
+        assert results.per_source_overall == {}
+        assert results.per_source_interface == {}

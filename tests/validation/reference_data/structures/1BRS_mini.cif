@@ -1,0 +1,95 @@
+data_1BRS_mini
+#
+loop_
+_atom_site.group_PDB
+_atom_site.id
+_atom_site.type_symbol
+_atom_site.label_atom_id
+_atom_site.label_alt_id
+_atom_site.label_comp_id
+_atom_site.label_asym_id
+_atom_site.label_entity_id
+_atom_site.label_seq_id
+_atom_site.pdbx_PDB_ins_code
+_atom_site.Cartn_x
+_atom_site.Cartn_y
+_atom_site.Cartn_z
+_atom_site.occupancy
+_atom_site.B_iso_or_equiv
+_atom_site.auth_seq_id
+_atom_site.auth_asym_id
+_atom_site.pdbx_PDB_model_num
+ATOM 1  N N  . ALA A ? 1 ? -1.200 0.550  0.000 1.0 20.0 1 A 1 
+ATOM 2  C CA . ALA A ? 1 ? 0.000  0.000  0.000 1.0 20.0 1 A 1 
+ATOM 3  C C  . ALA A ? 1 ? 1.200  0.550  0.000 1.0 20.0 1 A 1 
+ATOM 4  O O  . ALA A ? 1 ? 1.850  1.650  0.000 1.0 20.0 1 A 1 
+ATOM 5  C CB . ALA A ? 1 ? -0.300 -1.100 0.900 1.0 20.0 1 A 1 
+ATOM 6  N N  . GLY A ? 2 ? 2.600  0.550  0.000 1.0 20.0 2 A 1 
+ATOM 7  C CA . GLY A ? 2 ? 3.800  0.000  0.000 1.0 20.0 2 A 1 
+ATOM 8  C C  . GLY A ? 2 ? 5.000  0.550  0.000 1.0 20.0 2 A 1 
+ATOM 9  O O  . GLY A ? 2 ? 5.650  1.650  0.000 1.0 20.0 2 A 1 
+ATOM 10 N N  . VAL A ? 3 ? 6.400  0.550  0.000 1.0 20.0 3 A 1 
+ATOM 11 C CA . VAL A ? 3 ? 7.600  0.000  0.000 1.0 20.0 3 A 1 
+ATOM 12 C C  . VAL A ? 3 ? 8.800  0.550  0.000 1.0 20.0 3 A 1 
+ATOM 13 O O  . VAL A ? 3 ? 9.450  1.650  0.000 1.0 20.0 3 A 1 
+ATOM 14 C CB . VAL A ? 3 ? 7.300  -1.100 0.900 1.0 20.0 3 A 1 
+ATOM 15 N N  . LEU A ? 4 ? 10.200 0.550  0.000 1.0 20.0 4 A 1 
+ATOM 16 C CA . LEU A ? 4 ? 11.400 0.000  0.000 1.0 20.0 4 A 1 
+ATOM 17 C C  . LEU A ? 4 ? 12.600 0.550  0.000 1.0 20.0 4 A 1 
+ATOM 18 O O  . LEU A ? 4 ? 13.250 1.650  0.000 1.0 20.0 4 A 1 
+ATOM 19 C CB . LEU A ? 4 ? 11.100 -1.100 0.900 1.0 20.0 4 A 1 
+ATOM 20 N N  . ILE A ? 5 ? 14.000 0.550  0.000 1.0 20.0 5 A 1 
+ATOM 21 C CA . ILE A ? 5 ? 15.200 0.000  0.000 1.0 20.0 5 A 1 
+ATOM 22 C C  . ILE A ? 5 ? 16.400 0.550  0.000 1.0 20.0 5 A 1 
+ATOM 23 O O  . ILE A ? 5 ? 17.050 1.650  0.000 1.0 20.0 5 A 1 
+ATOM 24 C CB . ILE A ? 5 ? 14.900 -1.100 0.900 1.0 20.0 5 A 1 
+ATOM 25 N N  . SER A ? 6 ? 17.800 0.550  0.000 1.0 20.0 6 A 1 
+ATOM 26 C CA . SER A ? 6 ? 19.000 0.000  0.000 1.0 20.0 6 A 1 
+ATOM 27 C C  . SER A ? 6 ? 20.200 0.550  0.000 1.0 20.0 6 A 1 
+ATOM 28 O O  . SER A ? 6 ? 20.850 1.650  0.000 1.0 20.0 6 A 1 
+ATOM 29 C CB . SER A ? 6 ? 18.700 -1.100 0.900 1.0 20.0 6 A 1 
+ATOM 30 N N  . THR A ? 7 ? 21.600 0.550  0.000 1.0 20.0 7 A 1 
+ATOM 31 C CA . THR A ? 7 ? 22.800 0.000  0.000 1.0 20.0 7 A 1 
+ATOM 32 C C  . THR A ? 7 ? 24.000 0.550  0.000 1.0 20.0 7 A 1 
+ATOM 33 O O  . THR A ? 7 ? 24.650 1.650  0.000 1.0 20.0 7 A 1 
+ATOM 34 C CB . THR A ? 7 ? 22.500 -1.100 0.900 1.0 20.0 7 A 1 
+ATOM 35 N N  . PHE A ? 8 ? 25.400 0.550  0.000 1.0 20.0 8 A 1 
+ATOM 36 C CA . PHE A ? 8 ? 26.600 0.000  0.000 1.0 20.0 8 A 1 
+ATOM 37 C C  . PHE A ? 8 ? 27.800 0.550  0.000 1.0 20.0 8 A 1 
+ATOM 38 O O  . PHE A ? 8 ? 28.450 1.650  0.000 1.0 20.0 8 A 1 
+ATOM 39 C CB . PHE A ? 8 ? 26.300 -1.100 0.900 1.0 20.0 8 A 1 
+ATOM 40 N N  . ALA B ? 1 ? -1.200 5.550  0.000 1.0 20.0 1 D 1 
+ATOM 41 C CA . ALA B ? 1 ? 0.000  5.000  0.000 1.0 20.0 1 D 1 
+ATOM 42 C C  . ALA B ? 1 ? 1.200  5.550  0.000 1.0 20.0 1 D 1 
+ATOM 43 O O  . ALA B ? 1 ? 1.850  6.650  0.000 1.0 20.0 1 D 1 
+ATOM 44 C CB . ALA B ? 1 ? -0.300 3.900  0.900 1.0 20.0 1 D 1 
+ATOM 45 N N  . GLY B ? 2 ? 2.600  5.550  0.000 1.0 20.0 2 D 1 
+ATOM 46 C CA . GLY B ? 2 ? 3.800  5.000  0.000 1.0 20.0 2 D 1 
+ATOM 47 C C  . GLY B ? 2 ? 5.000  5.550  0.000 1.0 20.0 2 D 1 
+ATOM 48 O O  . GLY B ? 2 ? 5.650  6.650  0.000 1.0 20.0 2 D 1 
+ATOM 49 N N  . VAL B ? 3 ? 6.400  5.550  0.000 1.0 20.0 3 D 1 
+ATOM 50 C CA . VAL B ? 3 ? 7.600  5.000  0.000 1.0 20.0 3 D 1 
+ATOM 51 C C  . VAL B ? 3 ? 8.800  5.550  0.000 1.0 20.0 3 D 1 
+ATOM 52 O O  . VAL B ? 3 ? 9.450  6.650  0.000 1.0 20.0 3 D 1 
+ATOM 53 C CB . VAL B ? 3 ? 7.300  3.900  0.900 1.0 20.0 3 D 1 
+ATOM 54 N N  . LEU B ? 4 ? 10.200 5.550  0.000 1.0 20.0 4 D 1 
+ATOM 55 C CA . LEU B ? 4 ? 11.400 5.000  0.000 1.0 20.0 4 D 1 
+ATOM 56 C C  . LEU B ? 4 ? 12.600 5.550  0.000 1.0 20.0 4 D 1 
+ATOM 57 O O  . LEU B ? 4 ? 13.250 6.650  0.000 1.0 20.0 4 D 1 
+ATOM 58 C CB . LEU B ? 4 ? 11.100 3.900  0.900 1.0 20.0 4 D 1 
+ATOM 59 N N  . ILE B ? 5 ? 14.000 5.550  0.000 1.0 20.0 5 D 1 
+ATOM 60 C CA . ILE B ? 5 ? 15.200 5.000  0.000 1.0 20.0 5 D 1 
+ATOM 61 C C  . ILE B ? 5 ? 16.400 5.550  0.000 1.0 20.0 5 D 1 
+ATOM 62 O O  . ILE B ? 5 ? 17.050 6.650  0.000 1.0 20.0 5 D 1 
+ATOM 63 C CB . ILE B ? 5 ? 14.900 3.900  0.900 1.0 20.0 5 D 1 
+ATOM 64 N N  . SER B ? 6 ? 17.800 5.550  0.000 1.0 20.0 6 D 1 
+ATOM 65 C CA . SER B ? 6 ? 19.000 5.000  0.000 1.0 20.0 6 D 1 
+ATOM 66 C C  . SER B ? 6 ? 20.200 5.550  0.000 1.0 20.0 6 D 1 
+ATOM 67 O O  . SER B ? 6 ? 20.850 6.650  0.000 1.0 20.0 6 D 1 
+ATOM 68 C CB . SER B ? 6 ? 18.700 3.900  0.900 1.0 20.0 6 D 1 
+ATOM 69 N N  . THR B ? 7 ? 21.600 5.550  0.000 1.0 20.0 7 D 1 
+ATOM 70 C CA . THR B ? 7 ? 22.800 5.000  0.000 1.0 20.0 7 D 1 
+ATOM 71 C C  . THR B ? 7 ? 24.000 5.550  0.000 1.0 20.0 7 D 1 
+ATOM 72 O O  . THR B ? 7 ? 24.650 6.650  0.000 1.0 20.0 7 D 1 
+ATOM 73 C CB . THR B ? 7 ? 22.500 3.900  0.900 1.0 20.0 7 D 1 
+#

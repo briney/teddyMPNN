@@ -1,8 +1,8 @@
 """Token-budget batch sampler for variable-length protein structures.
 
-Groups dataset indices by cumulative residue count rather than a fixed
-batch size, keeping GPU memory usage roughly constant across batches
-despite the wide length distribution of protein structures.
+Bounds the *padded* compute per batch (``B * L_max``) instead of the sum of
+unpadded residue counts, so a single long example cannot blow the batch up
+past the configured budget once the collator pads everything to ``L_max``.
 """
 
 from __future__ import annotations
@@ -14,15 +14,20 @@ from torch.utils.data import Sampler
 
 
 class TokenBudgetBatchSampler(Sampler[list[int]]):
-    """Batch sampler that groups examples by total residue count.
+    """Batch sampler bounded by padded-token budget ``B * L_max``.
 
-    Accumulates dataset indices until the total residue count reaches the
-    token budget, then yields that group as a batch. Structures that
-    individually exceed the budget are placed in singleton batches.
+    For each candidate index, the sampler computes the prospective
+    ``(len(batch) + 1) * max(L_so_far, n)`` cost — exactly the residue
+    tensor footprint after padding to the new longest example. The batch
+    is flushed before adding any index that would exceed the budget. A
+    single example longer than the entire budget is emitted as a singleton
+    batch.
 
     Args:
         lengths: Per-example residue counts, indexed by dataset position.
-        token_budget: Maximum total residues per batch.
+        token_budget: Maximum padded residues per batch (``B * L_max``).
+            For LigandMPNN training the recommended value is ~6,000;
+            ProteinMPNN tolerates ~10,000.
         shuffle: Randomize example order each epoch.
         drop_last: Drop the final incomplete batch.
         seed: Random seed for reproducibility.
@@ -52,34 +57,56 @@ class TokenBudgetBatchSampler(Sampler[list[int]]):
             rng.shuffle(indices)
 
         batch: list[int] = []
-        batch_tokens = 0
+        current_max = 0
 
         for idx in indices:
             n = self.lengths[idx]
 
-            # If adding this example would exceed budget, yield current batch
-            if batch and batch_tokens + n > self.token_budget:
+            # Padded cost if we add this example: (B + 1) * max(current_max, n).
+            prospective_max = max(current_max, n)
+            prospective_cost = (len(batch) + 1) * prospective_max
+
+            if batch and prospective_cost > self.token_budget:
                 yield batch
                 batch = []
-                batch_tokens = 0
+                current_max = 0
+                prospective_max = n
 
             batch.append(idx)
-            batch_tokens += n
+            current_max = prospective_max
 
-        # Yield final batch
         if batch and not self.drop_last:
             yield batch
 
         self._epoch += 1
 
     def __len__(self) -> int:
-        """Estimate number of batches (may vary across epochs with shuffling)."""
+        """Estimate the number of batches.
+
+        Approximates by sorting lengths descending and packing greedily —
+        actual count varies with shuffle order but the estimate is a
+        reasonable upper bound for ``DataLoader`` progress reporting.
+        """
         if not self.lengths:
             return 0
 
-        total_tokens = sum(self.lengths)
-        # Approximate: actual count depends on packing order
-        return max(1, (total_tokens + self.token_budget - 1) // self.token_budget)
+        sorted_lengths = sorted(self.lengths, reverse=True)
+        batches = 0
+        batch_count = 0
+        current_max = 0
+        for n in sorted_lengths:
+            prospective_max = max(current_max, n)
+            prospective_cost = (batch_count + 1) * prospective_max
+            if batch_count > 0 and prospective_cost > self.token_budget:
+                batches += 1
+                batch_count = 0
+                current_max = 0
+                prospective_max = n
+            batch_count += 1
+            current_max = prospective_max
+        if batch_count > 0:
+            batches += 1
+        return max(1, batches)
 
     def set_epoch(self, epoch: int) -> None:
         """Set epoch for deterministic shuffling (DDP compatibility)."""

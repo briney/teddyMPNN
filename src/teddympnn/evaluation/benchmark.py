@@ -50,12 +50,13 @@ class BenchmarkResult:
 
     Attributes:
         model_name: Name of the model.
-        recovery: Sequence recovery results (None if not run).
+        recovery: Sequence-recovery results keyed by test-set name. Empty
+            if recovery was not run.
         skempi: SKEMPI ddG results (None if not run).
     """
 
     model_name: str
-    recovery: RecoveryResults | None = None
+    recovery: dict[str, RecoveryResults] = field(default_factory=dict)
     skempi: SKEMPIResults | None = None
 
 
@@ -76,8 +77,8 @@ class BenchmarkReport:
         out: dict[str, Any] = {"test_sets": self.test_sets, "models": []}
         for r in self.results:
             entry: dict[str, Any] = {"model_name": r.model_name}
-            if r.recovery is not None:
-                entry["recovery"] = asdict(r.recovery)
+            if r.recovery:
+                entry["recovery"] = {name: asdict(rec) for name, rec in r.recovery.items()}
             if r.skempi is not None:
                 d = asdict(r.skempi)
                 d.pop("per_structure_spearman", None)
@@ -168,10 +169,8 @@ def run_benchmark(
         model = _load_model(spec, device)
         result = BenchmarkResult(model_name=spec.name)
 
-        # Sequence recovery on test manifests
+        # Sequence recovery on test manifests (one entry per test set)
         if test_manifests:
-            # Use first test manifest for the summary recovery result
-            # (could be extended to per-test-set results)
             from teddympnn.data.collator import PaddingCollator
             from teddympnn.data.dataset import PPIDataset
             from teddympnn.data.sampler import TokenBudgetBatchSampler
@@ -190,8 +189,7 @@ def run_benchmark(
                 recovery = compute_recovery(
                     model, loader, interface_cutoff=interface_cutoff, device=device
                 )
-                # Store last (or only) result as the summary
-                result.recovery = recovery
+                result.recovery[name] = recovery
                 logger.info(
                     "    Overall=%.4f, Interface=%.4f (%d structures)",
                     recovery.overall_recovery,
@@ -239,12 +237,13 @@ def print_comparison_table(report: BenchmarkReport) -> None:
     """
     console = Console()
 
-    has_recovery = any(r.recovery is not None for r in report.results)
+    has_recovery = any(r.recovery for r in report.results)
     has_skempi = any(r.skempi is not None for r in report.results)
 
     if has_recovery:
         table = Table(title="Interface Sequence Recovery")
         table.add_column("Model", style="bold")
+        table.add_column("Test Set", style="bold")
         table.add_column("Overall", justify="right")
         table.add_column("Interface", justify="right")
         table.add_column("Per-struct", justify="right")
@@ -252,17 +251,18 @@ def print_comparison_table(report: BenchmarkReport) -> None:
         table.add_column("Structures", justify="right")
 
         for r in report.results:
-            if r.recovery is None:
+            if not r.recovery:
                 continue
-            rec = r.recovery
-            table.add_row(
-                r.model_name,
-                f"{rec.overall_recovery:.4f}",
-                f"{rec.interface_recovery:.4f}",
-                f"{rec.per_structure_recovery:.4f}",
-                f"{rec.per_structure_interface_recovery:.4f}",
-                str(rec.n_structures),
-            )
+            for name, rec in r.recovery.items():
+                table.add_row(
+                    r.model_name,
+                    name,
+                    f"{rec.overall_recovery:.4f}",
+                    f"{rec.interface_recovery:.4f}",
+                    f"{rec.per_structure_recovery:.4f}",
+                    f"{rec.per_structure_interface_recovery:.4f}",
+                    str(rec.n_structures),
+                )
 
         console.print(table)
         console.print()

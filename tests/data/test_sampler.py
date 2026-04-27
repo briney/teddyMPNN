@@ -110,3 +110,54 @@ class TestTokenBudgetBatchSampler:
             total = sum(lengths[i] for i in batch)
             # The first item that pushes over budget is included
             assert total <= 300 or len(batch) == 1
+
+
+class TestPaddedTokenBudget:
+    """The sampler must bound (B * L_max), not just sum(unpadded lengths)."""
+
+    def test_adversarial_long_short_mixture(self):
+        """One long example mixed with many short ones must not exceed B*L_max."""
+        # 1000-residue complex + 40 50-residue complexes. With sum-of-unpadded
+        # accounting, batch=[1000, 50, 50, ...] would all fit ~2000 tokens.
+        # With padded accounting, the long example pads short ones to 1000 →
+        # the budget should keep the batch tiny.
+        lengths = [1000, *([50] * 40)]
+        budget = 2000
+        sampler = TokenBudgetBatchSampler(lengths, token_budget=budget, shuffle=False)
+        for batch in sampler:
+            l_max = max(lengths[i] for i in batch)
+            padded = len(batch) * l_max
+            assert padded <= budget, (
+                f"Batch {batch} has padded cost {padded} > budget {budget} "
+                f"(L_max={l_max}, B={len(batch)})"
+            )
+
+    def test_padded_bound_under_shuffle(self):
+        """Padded bound must hold across shuffled epochs."""
+        rng_lengths = [50, 80, 1000, 60, 950, 70, 100, 90, 120, 60, 800]
+        budget = 1500
+        sampler = TokenBudgetBatchSampler(rng_lengths, token_budget=budget, shuffle=True, seed=7)
+        for epoch in range(3):
+            sampler.set_epoch(epoch)
+            for batch in sampler:
+                l_max = max(rng_lengths[i] for i in batch)
+                assert len(batch) * l_max <= budget or len(batch) == 1
+
+    def test_uniform_lengths_pack_normally(self):
+        """When all lengths are equal, B*L_max == sum, so packing matches."""
+        lengths = [100] * 20
+        budget = 400
+        sampler = TokenBudgetBatchSampler(lengths, token_budget=budget, shuffle=False)
+        batches = list(sampler)
+        # With uniform L=100 and budget 400 → 4 per batch.
+        for b in batches:
+            assert len(b) <= 4
+            l_max = max(lengths[i] for i in b)
+            assert len(b) * l_max <= budget
+
+    def test_singleton_when_single_example_exceeds_budget(self):
+        """A single example longer than the budget still gets emitted alone."""
+        lengths = [10, 5_000, 10]
+        sampler = TokenBudgetBatchSampler(lengths, token_budget=1_000, shuffle=False)
+        batches = list(sampler)
+        assert [1] in batches

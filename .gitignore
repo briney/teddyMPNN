@@ -186,5 +186,10 @@ cython_debug/
 # Foundry equivalence test reference data (large binary files)
 tests/validation/reference_data/*.pt
 tests/validation/reference_data/weights/
-tests/validation/reference_data/structures/
+# Reference structures (real PDBs are large; only the tiny *_mini fixtures
+# are committed — see scripts/generate_test_fixtures.py)
+tests/validation/reference_data/structures/*.pdb
+tests/validation/reference_data/structures/*.cif
+!tests/validation/reference_data/structures/*_mini.pdb
+!tests/validation/reference_data/structures/*_mini.cif
 tests/validation/reference_data/generate_foundry_reference.py

@@ -42,6 +42,10 @@ class RecoveryResults:
         n_designed_residues: Total designed residues scored.
         n_interface_residues: Total interface residues scored.
         size_bin_recoveries: Interface recovery stratified by interface size bin.
+        per_source_overall: Designed-residue recovery stratified by dataset
+            source (e.g. ``"teddymer"``, ``"nvidia"``, ``"pdb"``). Empty if
+            the loader did not provide a ``source`` field.
+        per_source_interface: Interface recovery stratified by dataset source.
     """
 
     overall_recovery: float
@@ -52,6 +56,8 @@ class RecoveryResults:
     n_designed_residues: int
     n_interface_residues: int
     size_bin_recoveries: dict[str, float] = field(default_factory=dict)
+    per_source_overall: dict[str, float] = field(default_factory=dict)
+    per_source_interface: dict[str, float] = field(default_factory=dict)
 
 
 def _move_batch(batch: dict[str, Any], device: torch.device) -> dict[str, Any]:
@@ -99,7 +105,14 @@ def compute_recovery(
     bin_correct: dict[str, int] = {name: 0 for name, _, _ in _SIZE_BINS}
     bin_total: dict[str, int] = {name: 0 for name, _, _ in _SIZE_BINS}
 
+    # Per-source accumulators (key set discovered from the loader)
+    src_overall_correct: dict[str, int] = {}
+    src_overall_total: dict[str, int] = {}
+    src_iface_correct: dict[str, int] = {}
+    src_iface_total: dict[str, int] = {}
+
     for batch in data_loader:
+        sources = batch.get("source")
         batch = _move_batch(batch, device)
         output = model(batch)
         preds = output["log_probs"].argmax(dim=-1)  # (B, L)
@@ -133,16 +146,16 @@ def compute_recovery(
             correct = preds[b] == batch["S"][b]
 
             # Overall designed recovery
-            n_des = valid_designed.sum().item()
-            n_cor = (correct & valid_designed).sum().item()
+            n_des = int(valid_designed.sum().item())
+            n_cor = int((correct & valid_designed).sum().item())
             total_correct += n_cor
             total_designed += n_des
             if n_des > 0:
                 structure_recoveries.append(n_cor / n_des)
 
             # Interface recovery
-            n_if = designed_iface.sum().item()
-            n_if_cor = (correct & designed_iface).sum().item()
+            n_if = int(designed_iface.sum().item())
+            n_if_cor = int((correct & designed_iface).sum().item())
             total_iface_correct += n_if_cor
             total_iface += n_if
             structure_iface_sizes.append(n_if)
@@ -157,11 +170,27 @@ def compute_recovery(
                         bin_total[name] += n_if
                         break
 
+            # Per-source stratification
+            if sources is not None and b < len(sources):
+                src = str(sources[b])
+                if n_des > 0:
+                    src_overall_correct[src] = src_overall_correct.get(src, 0) + n_cor
+                    src_overall_total[src] = src_overall_total.get(src, 0) + n_des
+                if n_if > 0:
+                    src_iface_correct[src] = src_iface_correct.get(src, 0) + n_if_cor
+                    src_iface_total[src] = src_iface_total.get(src, 0) + n_if
+
     # Aggregate
     size_bin_recoveries = {
         name: bin_correct[name] / max(bin_total[name], 1)
         for name, _, _ in _SIZE_BINS
         if bin_total[name] > 0
+    }
+    per_source_overall = {
+        src: src_overall_correct[src] / src_overall_total[src] for src in src_overall_total
+    }
+    per_source_interface = {
+        src: src_iface_correct[src] / src_iface_total[src] for src in src_iface_total
     }
 
     return RecoveryResults(
@@ -175,4 +204,6 @@ def compute_recovery(
         n_designed_residues=total_designed,
         n_interface_residues=total_iface,
         size_bin_recoveries=size_bin_recoveries,
+        per_source_overall=per_source_overall,
+        per_source_interface=per_source_interface,
     )

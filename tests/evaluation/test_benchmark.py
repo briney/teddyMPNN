@@ -21,11 +21,11 @@ class TestBenchmarkResult:
     def test_empty_result(self) -> None:
         """BenchmarkResult can be created with no metrics."""
         result = BenchmarkResult(model_name="test")
-        assert result.recovery is None
+        assert result.recovery == {}
         assert result.skempi is None
 
     def test_with_recovery(self) -> None:
-        """BenchmarkResult stores recovery metrics."""
+        """BenchmarkResult stores recovery metrics keyed by test set."""
         recovery = RecoveryResults(
             overall_recovery=0.42,
             interface_recovery=0.38,
@@ -35,9 +35,33 @@ class TestBenchmarkResult:
             n_designed_residues=5000,
             n_interface_residues=1200,
         )
-        result = BenchmarkResult(model_name="test", recovery=recovery)
-        assert result.recovery is not None
-        assert result.recovery.overall_recovery == pytest.approx(0.42)
+        result = BenchmarkResult(model_name="test", recovery={"val": recovery})
+        assert "val" in result.recovery
+        assert result.recovery["val"].overall_recovery == pytest.approx(0.42)
+
+    def test_multiple_test_sets(self) -> None:
+        """BenchmarkResult preserves recovery for each test set."""
+        rec_a = RecoveryResults(
+            overall_recovery=0.40,
+            interface_recovery=0.35,
+            per_structure_recovery=0.38,
+            per_structure_interface_recovery=0.33,
+            n_structures=10,
+            n_designed_residues=500,
+            n_interface_residues=120,
+        )
+        rec_b = RecoveryResults(
+            overall_recovery=0.55,
+            interface_recovery=0.50,
+            per_structure_recovery=0.52,
+            per_structure_interface_recovery=0.48,
+            n_structures=10,
+            n_designed_residues=500,
+            n_interface_residues=120,
+        )
+        result = BenchmarkResult(model_name="m", recovery={"val_a": rec_a, "val_b": rec_b})
+        assert result.recovery["val_a"].overall_recovery == pytest.approx(0.40)
+        assert result.recovery["val_b"].overall_recovery == pytest.approx(0.55)
 
 
 class TestBenchmarkReport:
@@ -47,15 +71,17 @@ class TestBenchmarkReport:
         results = [
             BenchmarkResult(
                 model_name="baseline",
-                recovery=RecoveryResults(
-                    overall_recovery=0.40,
-                    interface_recovery=0.35,
-                    per_structure_recovery=0.38,
-                    per_structure_interface_recovery=0.33,
-                    n_structures=50,
-                    n_designed_residues=3000,
-                    n_interface_residues=800,
-                ),
+                recovery={
+                    "val": RecoveryResults(
+                        overall_recovery=0.40,
+                        interface_recovery=0.35,
+                        per_structure_recovery=0.38,
+                        per_structure_interface_recovery=0.33,
+                        n_structures=50,
+                        n_designed_residues=3000,
+                        n_interface_residues=800,
+                    )
+                },
                 skempi=SKEMPIResults(
                     spearman=0.30,
                     pearson=0.28,
@@ -69,15 +95,17 @@ class TestBenchmarkReport:
             ),
             BenchmarkResult(
                 model_name="fine-tuned",
-                recovery=RecoveryResults(
-                    overall_recovery=0.50,
-                    interface_recovery=0.48,
-                    per_structure_recovery=0.49,
-                    per_structure_interface_recovery=0.47,
-                    n_structures=50,
-                    n_designed_residues=3000,
-                    n_interface_residues=800,
-                ),
+                recovery={
+                    "val": RecoveryResults(
+                        overall_recovery=0.50,
+                        interface_recovery=0.48,
+                        per_structure_recovery=0.49,
+                        per_structure_interface_recovery=0.47,
+                        n_structures=50,
+                        n_designed_residues=3000,
+                        n_interface_residues=800,
+                    )
+                },
                 skempi=SKEMPIResults(
                     spearman=0.45,
                     pearson=0.42,
@@ -112,7 +140,7 @@ class TestBenchmarkReport:
         with open(json_path) as f:
             data = json.load(f)
         assert len(data["models"]) == 2
-        assert data["models"][1]["recovery"]["overall_recovery"] == pytest.approx(0.50)
+        assert data["models"][1]["recovery"]["val"]["overall_recovery"] == pytest.approx(0.50)
 
     def test_print_comparison_table(self, sample_report: BenchmarkReport) -> None:
         """Comparison table prints without errors."""

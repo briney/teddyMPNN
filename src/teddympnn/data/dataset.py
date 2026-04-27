@@ -86,9 +86,9 @@ class PPIDataset(Dataset[dict[str, Any]]):
         self.manifest = pd.read_csv(self.manifest_path, sep="\t")
         self._validate_manifest()
         if self.source_filter is not None:
-            self.manifest = self.manifest[self.manifest["source"] == self.source_filter].reset_index(
-                drop=True
-            )
+            self.manifest = self.manifest[
+                self.manifest["source"] == self.source_filter
+            ].reset_index(drop=True)
 
         # Build view index: each structure yields two views
         # (design A conditioned on B, design B conditioned on A)
@@ -246,6 +246,7 @@ class PPIDataset(Dataset[dict[str, Any]]):
     def __getitem__(self, idx: int) -> dict[str, Any]:
         manifest_idx, design_chains, fixed_chains = self._views[idx]
         features = self._load_features(manifest_idx)
+        source = str(self.manifest.iloc[manifest_idx].get("source", "unknown"))
 
         chain_ids: list[str] = features["chain_ids"]
         design_chain_set = set(design_chains.split(","))
@@ -281,6 +282,7 @@ class PPIDataset(Dataset[dict[str, Any]]):
             "designed_residue_mask": designed_residue_mask,
             "fixed_residue_mask": fixed_residue_mask,
             "num_residues": L,
+            "source": source,
         }
 
         # Ligand context
@@ -424,9 +426,9 @@ class MixedDataLoader:
         yielded = 0
         target_batches = len(self)
         while yielded < target_batches:
-            source_idx = rng.choices(
-                range(len(self._loaders)), weights=self._active_weights, k=1
-            )[0]
+            source_idx = rng.choices(range(len(self._loaders)), weights=self._active_weights, k=1)[
+                0
+            ]
             try:
                 batch = next(iterators[source_idx])
             except StopIteration:

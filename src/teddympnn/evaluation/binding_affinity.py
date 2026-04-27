@@ -12,16 +12,16 @@ random decoding order) for variance reduction.
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path  # noqa: TC003 — used at runtime in predict_ddg signature
 from typing import Any
 
 import torch
 
-from teddympnn.data.features import (
-    derive_backbone,
-    extract_ligand_atoms,
-    extract_sidechain_atoms,
-    parse_structure,
+from teddympnn.evaluation._batch import (
+    build_eval_batch,
+    extract_chain_view,
+    load_eval_features,
 )
 from teddympnn.models.ligand_mpnn import LigandMPNN
 from teddympnn.models.tokens import (
@@ -33,82 +33,33 @@ from teddympnn.models.tokens import (
 logger = logging.getLogger(__name__)
 
 
+# Splits a mutation body like "52a" or "-3" into (resnum, icode).
+_MUT_BODY_RE = re.compile(r"^(-?\d+)([A-Za-z]?)$")
+
+
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
 
 
-def _make_batch(
-    features: dict[str, Any],
-    designed_mask: torch.Tensor,
-    device: torch.device,
-    *,
-    include_ligand_context: bool = False,
-) -> dict[str, torch.Tensor]:
-    """Create a single-example batch (B=1) from unbatched features."""
-    X, X_m = derive_backbone(features["xyz_37"], features["xyz_37_m"])
-    batch = {
-        "X": X.unsqueeze(0).to(device),
-        "S": features["S"].unsqueeze(0).to(device),
-        "R_idx": features["R_idx"].unsqueeze(0).to(device),
-        "chain_labels": features["chain_labels"].unsqueeze(0).to(device),
-        "residue_mask": features["residue_mask"].unsqueeze(0).to(device),
-        "designed_residue_mask": designed_mask.unsqueeze(0).to(device),
-        "fixed_residue_mask": (~designed_mask).unsqueeze(0).to(device),
-    }
-    if include_ligand_context:
-        Y = features.get("Y", torch.zeros(0, 3, dtype=torch.float32))
-        Y_m = features.get("Y_m", torch.zeros(0, dtype=torch.bool))
-        Y_t = features.get("Y_t", torch.zeros(0, dtype=torch.long))
-        sidechains = extract_sidechain_atoms(
-            features["xyz_37"],
-            features["xyz_37_m"],
-            features["S"],
-            ~designed_mask,
-        )
-        if sidechains["Y"].shape[0] > 0:
-            Y = torch.cat([Y, sidechains["Y"]], dim=0)
-            Y_m = torch.cat([Y_m, sidechains["Y_m"]], dim=0)
-            Y_t = torch.cat([Y_t, sidechains["Y_t"]], dim=0)
-        batch["Y"] = Y.unsqueeze(0).to(device)
-        batch["Y_m"] = Y_m.unsqueeze(0).to(device)
-        batch["Y_t"] = Y_t.unsqueeze(0).to(device)
-    return batch
+def _model_type(model: torch.nn.Module) -> str:
+    return "ligand_mpnn" if isinstance(model, LigandMPNN) else "protein_mpnn"
 
 
-def _extract_chain_features(
-    features: dict[str, Any],
-    chain_ids: list[str],
-    target_chains: set[str],
-) -> tuple[dict[str, Any], list[str], list[int]]:
-    """Extract features for a subset of chains.
-
-    Args:
-        features: Unbatched feature dict from parse_structure.
-        chain_ids: Per-residue chain ID strings.
-        target_chains: Set of chain IDs to keep.
-
-    Returns:
-        Tuple of (filtered features, filtered chain_ids, filtered residue_numbers).
-    """
-    mask = torch.tensor([cid in target_chains for cid in chain_ids])
-    new_features: dict[str, Any] = {}
-    for key in ("xyz_37", "xyz_37_m", "S", "R_idx", "chain_labels", "residue_mask"):
-        if key in features:
-            new_features[key] = features[key][mask]
-
-    mask_list = mask.tolist()
-    new_chain_ids = [cid for cid, m in zip(chain_ids, mask_list, strict=True) if m]
-    residue_numbers: list[int] = features.get("residue_numbers", [])
-    new_residue_numbers = [rn for rn, m in zip(residue_numbers, mask_list, strict=True) if m]
-
-    return new_features, new_chain_ids, new_residue_numbers
+def _parse_mutation_body(body: str) -> tuple[int, str]:
+    """Split a mutation residue body like ``"52a"`` into ``(52, "a")``."""
+    m = _MUT_BODY_RE.match(body)
+    if m is None:
+        msg = f"Cannot parse mutation residue identifier: '{body}'"
+        raise ValueError(msg)
+    return int(m.group(1)), m.group(2)
 
 
 def _apply_mutations(
     features: dict[str, Any],
     chain_ids: list[str],
     residue_numbers: list[int],
+    residue_icodes: list[str],
     mutations: dict[str, dict[str, str | None]],
 ) -> tuple[dict[str, Any], torch.Tensor]:
     """Apply mutations to the sequence tensor.
@@ -117,8 +68,9 @@ def _apply_mutations(
         features: Unbatched feature dict.
         chain_ids: Per-residue chain IDs.
         residue_numbers: Per-residue PDB residue numbers.
+        residue_icodes: Per-residue PDB insertion codes (``""`` if none).
         mutations: ``{chain_id: {mutation_str: None}}`` where mutation_str
-            is ``"A45G"`` (wt_1letter + resnum + mut_1letter).
+            is ``"A45G"`` or ``"L52aG"`` (wt + resnum [+ icode] + mut).
 
     Returns:
         Tuple of (mutant features, mutation_mask as ``(L,)`` bool tensor).
@@ -130,7 +82,7 @@ def _apply_mutations(
         for mut_str in chain_muts:
             wt_aa_1 = mut_str[0]
             mut_aa_1 = mut_str[-1]
-            resnum = int(mut_str[1:-1])
+            resnum, icode = _parse_mutation_body(mut_str[1:-1])
 
             wt_aa_3 = AMINO_ACIDS_1TO3.get(wt_aa_1)
             mut_aa_3 = AMINO_ACIDS_1TO3.get(mut_aa_1)
@@ -139,18 +91,21 @@ def _apply_mutations(
                 raise ValueError(msg)
 
             found = False
-            for i, (cid, rn) in enumerate(zip(chain_ids, residue_numbers, strict=True)):
-                if cid == chain_id and rn == resnum:
+            for i, (cid, rn, ic) in enumerate(
+                zip(chain_ids, residue_numbers, residue_icodes, strict=True)
+            ):
+                if cid == chain_id and rn == resnum and ic == icode:
                     expected_idx = token_to_idx[wt_aa_3]
                     actual_idx = features["S"][i].item()
                     if actual_idx != expected_idx:
                         actual_name = idx_to_token.get(actual_idx, "???")
                         logger.warning(
-                            "Mutation %s on chain %s: expected %s at position %d but found %s",
+                            "Mutation %s on chain %s: expected %s at %d%s but found %s",
                             mut_str,
                             chain_id,
                             wt_aa_3,
                             resnum,
+                            icode,
                             actual_name,
                         )
                     S_mut[i] = token_to_idx[mut_aa_3]
@@ -159,7 +114,7 @@ def _apply_mutations(
                     break
 
             if not found:
-                msg = f"Residue {chain_id}:{resnum} not found in structure"
+                msg = f"Residue {chain_id}:{resnum}{icode} not found in structure"
                 raise ValueError(msg)
 
     mut_features = {**features, "S": S_mut}
@@ -203,7 +158,8 @@ def score_structure(
 
     Args:
         model: ProteinMPNN or LigandMPNN model (set to eval externally).
-        input_features: Batched feature dict (B=1).
+        input_features: Batched feature dict (B=1) — should already include
+            ligand context tensors when ``model`` is a ``LigandMPNN``.
         score_mask: ``(1, L)`` mask of positions to score.
         seed: Random seed for reproducible decoding order.
         structure_noise: Gaussian noise std for backbone coordinates (A).
@@ -227,8 +183,90 @@ def score_structure(
     # Since we seeded above and noise consumed a fixed amount of randomness
     # (determined by X.shape, identical for wt and mut), the decoding order
     # will be identical when called with the same seed.
-    per_residue: torch.Tensor = model.score(features, score_mask=score_mask)  # type: ignore[operator]
+    per_residue: torch.Tensor = model.score(features, score_mask=score_mask)
     return float(per_residue.sum().item())
+
+
+@torch.no_grad()
+def score_complex(
+    model: torch.nn.Module,
+    structure_path: str | Path,
+    *,
+    designed_chains: list[str] | None = None,
+    num_samples: int = 20,
+    structure_noise: float = 0.0,
+    device: torch.device | None = None,
+) -> torch.Tensor:
+    """Score a complex by averaging per-residue log-probabilities.
+
+    Loads a structure file, builds the appropriate ProteinMPNN or LigandMPNN
+    batch, and runs ``num_samples`` teacher-forced scoring passes with
+    independent decoding orders. Returns the mean per-residue
+    log-probability at every designed position.
+
+    Args:
+        model: ProteinMPNN or LigandMPNN model.
+        structure_path: Path to a PDB or mmCIF file.
+        designed_chains: Chain IDs whose residues are scored. Defaults to
+            all chains in the structure (i.e., score every residue).
+        num_samples: Number of scoring passes to average (each with a
+            fresh decoding order).
+        structure_noise: Backbone coordinate noise std (A) for ensemble
+            scoring.
+        device: Device for computation. Defaults to the model's device.
+
+    Returns:
+        ``(L_designed,)`` float tensor of mean log-probabilities at the
+        designed residues, in structure order.
+    """
+    if device is None:
+        device = next(model.parameters()).device
+    model.eval()
+
+    model_type = _model_type(model)
+    features = load_eval_features(structure_path, model_type=model_type)
+
+    chain_ids: list[str] = features["chain_ids"]
+    L = len(chain_ids)
+
+    if designed_chains is None:
+        designed_set: set[str] = set(chain_ids)
+    else:
+        designed_set = set(designed_chains)
+
+    designed_mask = torch.tensor([cid in designed_set for cid in chain_ids], dtype=torch.bool)
+    if not designed_mask.any():
+        msg = (
+            f"No residues match designed_chains={sorted(designed_set)}; "
+            f"available chains: {sorted(set(chain_ids))}"
+        )
+        raise ValueError(msg)
+
+    fixed_mask = (~designed_mask) & torch.ones(L, dtype=torch.bool)
+    batch = build_eval_batch(
+        features,
+        designed_mask,
+        device,
+        model_type=model_type,
+        fixed_residue_mask=fixed_mask,
+    )
+    score_mask = designed_mask.unsqueeze(0).to(device)
+
+    accum = torch.zeros(L, dtype=torch.float32, device=device)
+    for sample_idx in range(num_samples):
+        torch.manual_seed(sample_idx)
+        if device.type == "cuda":
+            torch.cuda.manual_seed(sample_idx)
+        sample_features = batch
+        if structure_noise > 0:
+            noise = torch.randn_like(batch["X"])
+            sample_features = {**batch, "X": batch["X"] + structure_noise * noise}
+        per_residue: torch.Tensor = model.score(sample_features, score_mask=score_mask)
+        accum = accum + per_residue.squeeze(0)
+
+    mean_log_probs = accum / max(num_samples, 1)
+    designed_indices = designed_mask.nonzero(as_tuple=True)[0].to(device)
+    return mean_log_probs.index_select(0, designed_indices).cpu()
 
 
 @torch.no_grad()
@@ -259,7 +297,8 @@ def predict_ddg(
         model: ProteinMPNN or LigandMPNN model.
         structure_path: Path to PDB/mmCIF structure file.
         mutations: ``{chain_id: {mutation_str: None}}`` where each
-            mutation_str is formatted as ``"A45G"`` (wt + resnum + mut).
+            mutation_str is formatted as ``"A45G"`` or ``"L52aG"``
+            (wt + resnum [+ insertion code] + mut).
         num_samples: Number of Monte Carlo samples for averaging.
         structure_noise: Backbone noise for ensemble scoring (A).
         partner_chains: Explicit partner grouping as
@@ -278,13 +317,11 @@ def predict_ddg(
         device = next(model.parameters()).device
     model.eval()
 
-    # Parse structure
-    features = parse_structure(structure_path)
-    is_ligand_model = isinstance(model, LigandMPNN)
-    if is_ligand_model:
-        features.update(extract_ligand_atoms(structure_path))
+    model_type = _model_type(model)
+    features = load_eval_features(structure_path, model_type=model_type)
     chain_ids: list[str] = features["chain_ids"]
     residue_numbers: list[int] = features["residue_numbers"]
+    residue_icodes: list[str] = features.get("residue_icodes", [""] * len(chain_ids))
 
     # Determine partner chain groupings
     if partner_chains is None:
@@ -305,29 +342,38 @@ def predict_ddg(
         features,
         chain_ids,
         residue_numbers,
+        residue_icodes,
         mutations,
     )
 
-    # Extract chain-level views and masks
-    chain_a_wt, chain_a_ids, _ = _extract_chain_features(
+    # Extract chain-level views
+    chain_a_wt, chain_a_ids, _, _ = extract_chain_view(
         features,
         chain_ids,
         partner_a,
+        residue_numbers=residue_numbers,
+        residue_icodes=residue_icodes,
     )
-    chain_a_mut, _, _ = _extract_chain_features(
+    chain_a_mut, _, _, _ = extract_chain_view(
         mut_features,
         chain_ids,
         partner_a,
+        residue_numbers=residue_numbers,
+        residue_icodes=residue_icodes,
     )
-    chain_b_wt, chain_b_ids, _ = _extract_chain_features(
+    chain_b_wt, chain_b_ids, _, _ = extract_chain_view(
         features,
         chain_ids,
         partner_b,
+        residue_numbers=residue_numbers,
+        residue_icodes=residue_icodes,
     )
-    chain_b_mut, _, _ = _extract_chain_features(
+    chain_b_mut, _, _, _ = extract_chain_view(
         mut_features,
         chain_ids,
         partner_b,
+        residue_numbers=residue_numbers,
+        residue_icodes=residue_icodes,
     )
 
     # Build mutation masks for each view
@@ -335,46 +381,59 @@ def predict_ddg(
     mask_a = _map_mask_to_chain(mutation_mask, chain_ids, partner_a)  # (L_A,)
     mask_b = _map_mask_to_chain(mutation_mask, chain_ids, partner_b)  # (L_B,)
 
-    # Build batches (B=1) — all residues are "designed" for scoring
+    # Build batches (B=1) — ddG decomposition treats every residue as
+    # designed, so the fixed_residue_mask is empty here.
     L_ab = len(chain_ids)
     L_a = len(chain_a_ids)
     L_b = len(chain_b_ids)
+    full_designed_ab = torch.ones(L_ab, dtype=torch.bool)
+    full_designed_a = torch.ones(L_a, dtype=torch.bool)
+    full_designed_b = torch.ones(L_b, dtype=torch.bool)
+    empty_fixed_ab = torch.zeros(L_ab, dtype=torch.bool)
+    empty_fixed_a = torch.zeros(L_a, dtype=torch.bool)
+    empty_fixed_b = torch.zeros(L_b, dtype=torch.bool)
 
-    batch_ab_wt = _make_batch(
+    batch_ab_wt = build_eval_batch(
         features,
-        mask_ab,
+        full_designed_ab,
         device,
-        include_ligand_context=is_ligand_model,
+        model_type=model_type,
+        fixed_residue_mask=empty_fixed_ab,
     )
-    batch_ab_mut = _make_batch(
+    batch_ab_mut = build_eval_batch(
         mut_features,
-        mask_ab,
+        full_designed_ab,
         device,
-        include_ligand_context=is_ligand_model,
+        model_type=model_type,
+        fixed_residue_mask=empty_fixed_ab,
     )
-    batch_a_wt = _make_batch(
+    batch_a_wt = build_eval_batch(
         chain_a_wt,
-        mask_a,
+        full_designed_a,
         device,
-        include_ligand_context=is_ligand_model,
+        model_type=model_type,
+        fixed_residue_mask=empty_fixed_a,
     )
-    batch_a_mut = _make_batch(
+    batch_a_mut = build_eval_batch(
         chain_a_mut,
-        mask_a,
+        full_designed_a,
         device,
-        include_ligand_context=is_ligand_model,
+        model_type=model_type,
+        fixed_residue_mask=empty_fixed_a,
     )
-    batch_b_wt = _make_batch(
+    batch_b_wt = build_eval_batch(
         chain_b_wt,
-        mask_b,
+        full_designed_b,
         device,
-        include_ligand_context=is_ligand_model,
+        model_type=model_type,
+        fixed_residue_mask=empty_fixed_b,
     )
-    batch_b_mut = _make_batch(
+    batch_b_mut = build_eval_batch(
         chain_b_mut,
-        mask_b,
+        full_designed_b,
         device,
-        include_ligand_context=is_ligand_model,
+        model_type=model_type,
+        fixed_residue_mask=empty_fixed_b,
     )
 
     # Score masks (on device, shape (1, L))

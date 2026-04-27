@@ -7,11 +7,11 @@ from pathlib import Path  # noqa: TC003 — used at runtime in fixtures
 import pytest
 import torch
 
+from teddympnn.evaluation._batch import build_eval_batch, extract_chain_view
 from teddympnn.evaluation.binding_affinity import (
     _apply_mutations,
-    _extract_chain_features,
-    _make_batch,
     predict_ddg,
+    score_complex,
     score_structure,
 )
 from teddympnn.models import ProteinMPNN
@@ -77,7 +77,7 @@ class TestScoreStructure:
         features = parse_structure(tmp_path / "test.pdb")
         L = len(features["S"])
         designed = torch.ones(L, dtype=torch.bool)
-        batch = _make_batch(features, designed, torch.device("cpu"))
+        batch = build_eval_batch(features, designed, torch.device("cpu"), model_type="protein_mpnn")
         mask = torch.ones(1, L, dtype=torch.bool)
 
         s1 = score_structure(model, batch, mask, seed=42)
@@ -95,7 +95,7 @@ class TestScoreStructure:
         features = parse_structure(tmp_path / "test.pdb")
         L = len(features["S"])
         designed = torch.ones(L, dtype=torch.bool)
-        batch = _make_batch(features, designed, torch.device("cpu"))
+        batch = build_eval_batch(features, designed, torch.device("cpu"), model_type="protein_mpnn")
         mask = torch.ones(1, L, dtype=torch.bool)
 
         scores = [score_structure(model, batch, mask, seed=i) for i in range(10)]
@@ -112,9 +112,12 @@ class TestApplyMutations:
         features = {"S": S}
         chain_ids = ["A"] * 10
         residue_numbers = list(range(1, 11))
+        residue_icodes = [""] * 10
         mutations = {"A": {"A5G": None}}
 
-        mut_features, mask = _apply_mutations(features, chain_ids, residue_numbers, mutations)
+        mut_features, mask = _apply_mutations(
+            features, chain_ids, residue_numbers, residue_icodes, mutations
+        )
 
         assert mask.sum().item() == 1
         assert mask[4].item() is True  # 0-indexed position 4 = PDB residue 5
@@ -129,9 +132,12 @@ class TestApplyMutations:
         features = {"S": S}
         chain_ids = ["A"] * 10
         residue_numbers = list(range(1, 11))
+        residue_icodes = [""] * 10
         mutations = {"A": {"A1G": None, "A3L": None}}
 
-        mut_features, mask = _apply_mutations(features, chain_ids, residue_numbers, mutations)
+        mut_features, mask = _apply_mutations(
+            features, chain_ids, residue_numbers, residue_icodes, mutations
+        )
 
         assert mask.sum().item() == 2
         assert mut_features["S"][0].item() == token_to_idx["GLY"]
@@ -143,9 +149,12 @@ class TestApplyMutations:
         features = {"S": S}
         chain_ids = ["A"] * 10 + ["B"] * 10
         residue_numbers = list(range(1, 11)) + list(range(1, 11))
+        residue_icodes = [""] * 20
         mutations = {"A": {"A2G": None}, "B": {"A5W": None}}
 
-        mut_features, mask = _apply_mutations(features, chain_ids, residue_numbers, mutations)
+        mut_features, mask = _apply_mutations(
+            features, chain_ids, residue_numbers, residue_icodes, mutations
+        )
 
         assert mask.sum().item() == 2
         assert mask[1].item() is True  # chain A, residue 2
@@ -161,12 +170,73 @@ class TestApplyMutations:
                 features,
                 chain_ids=["A"] * 5,
                 residue_numbers=list(range(1, 6)),
+                residue_icodes=[""] * 5,
                 mutations={"A": {"A99G": None}},
             )
 
 
-class TestExtractChainFeatures:
-    """Tests for _extract_chain_features."""
+class TestApplyMutationsInsertionCode:
+    """Mutations carrying PDB insertion codes (e.g. ``L52aG``) must apply."""
+
+    def test_insertion_code_match(self) -> None:
+        """The mutation residue 52a must match the residue with icode='a'."""
+        S = torch.tensor(
+            [token_to_idx["ALA"], token_to_idx["LEU"], token_to_idx["LEU"], token_to_idx["VAL"]]
+        )
+        features = {"S": S}
+        chain_ids = ["A", "A", "A", "A"]
+        # Two residues numbered 52, distinguished by insertion code.
+        residue_numbers = [51, 52, 52, 53]
+        residue_icodes = ["", "", "a", ""]
+
+        mut_features, mask = _apply_mutations(
+            features,
+            chain_ids,
+            residue_numbers,
+            residue_icodes,
+            mutations={"A": {"L52aG": None}},
+        )
+
+        assert mask.sum().item() == 1
+        # Position 2 is the icode='a' residue
+        assert mask[2].item() is True
+        assert mut_features["S"][2].item() == token_to_idx["GLY"]
+        # The plain "52" residue must remain unchanged.
+        assert mut_features["S"][1].item() == token_to_idx["LEU"]
+
+    def test_insertion_code_distinct_from_plain(self) -> None:
+        """Mutations on residue 52 must not match residue 52a and vice versa."""
+        S = torch.tensor([token_to_idx["LEU"], token_to_idx["LEU"]])
+        features = {"S": S}
+        chain_ids = ["A", "A"]
+        residue_numbers = [52, 52]
+        residue_icodes = ["", "a"]
+
+        # L52G should hit the icode="" residue only.
+        mut_features, mask = _apply_mutations(
+            features,
+            chain_ids,
+            residue_numbers,
+            residue_icodes,
+            mutations={"A": {"L52G": None}},
+        )
+        assert mask[0].item() is True and mask[1].item() is False
+
+    def test_insertion_code_missing_raises(self) -> None:
+        """Asking for residue 52a when only 52 exists should raise."""
+        features = {"S": torch.tensor([token_to_idx["LEU"]])}
+        with pytest.raises(ValueError, match="not found"):
+            _apply_mutations(
+                features,
+                chain_ids=["A"],
+                residue_numbers=[52],
+                residue_icodes=[""],
+                mutations={"A": {"L52aG": None}},
+            )
+
+
+class TestExtractChainView:
+    """Tests for ``extract_chain_view``."""
 
     def test_extracts_correct_chain(self) -> None:
         """Should extract only residues belonging to target chains."""
@@ -178,15 +248,21 @@ class TestExtractChainFeatures:
             "chain_labels": torch.cat([torch.zeros(10), torch.ones(10)]).long(),
             "residue_mask": torch.ones(20, dtype=torch.bool),
             "residue_numbers": list(range(1, 11)) + list(range(1, 11)),
+            "residue_icodes": [""] * 20,
         }
         chain_ids = ["A"] * 10 + ["B"] * 10
 
-        new_feat, new_ids, new_nums = _extract_chain_features(features, chain_ids, {"A"})
+        new_feat, new_ids, new_nums, new_icodes = extract_chain_view(
+            features,
+            chain_ids,
+            {"A"},
+        )
 
         assert new_feat["S"].shape[0] == 10
         assert len(new_ids) == 10
         assert all(c == "A" for c in new_ids)
         assert new_nums == list(range(1, 11))
+        assert new_icodes == [""] * 10
 
 
 class TestPredictDdg:
@@ -277,3 +353,49 @@ class TestPredictDdg:
             device=torch.device("cpu"),
         )
         assert not torch.isnan(torch.tensor(ddg))
+
+
+class TestScoreComplex:
+    """Tests for ``score_complex`` (per-residue log-probability scoring)."""
+
+    def test_returns_designed_residues(self, tmp_path: Path) -> None:
+        """Output length should match the designed-chain residue count."""
+        model = _make_model()
+        _write_test_pdb(tmp_path / "test.pdb", n_res_a=8, n_res_b=8)
+
+        scores = score_complex(
+            model,
+            tmp_path / "test.pdb",
+            designed_chains=["A"],
+            num_samples=2,
+            device=torch.device("cpu"),
+        )
+        assert scores.shape == (8,)
+        assert torch.isfinite(scores).all()
+
+    def test_default_scores_all_chains(self, tmp_path: Path) -> None:
+        """Without designed_chains, score every residue in the structure."""
+        model = _make_model()
+        _write_test_pdb(tmp_path / "test.pdb", n_res_a=6, n_res_b=7)
+
+        scores = score_complex(
+            model,
+            tmp_path / "test.pdb",
+            num_samples=2,
+            device=torch.device("cpu"),
+        )
+        assert scores.shape == (13,)
+
+    def test_unknown_chain_raises(self, tmp_path: Path) -> None:
+        """Selecting a chain that does not exist should raise."""
+        model = _make_model()
+        _write_test_pdb(tmp_path / "test.pdb", n_res_a=4, n_res_b=4)
+
+        with pytest.raises(ValueError, match="No residues match"):
+            score_complex(
+                model,
+                tmp_path / "test.pdb",
+                designed_chains=["Z"],
+                num_samples=1,
+                device=torch.device("cpu"),
+            )

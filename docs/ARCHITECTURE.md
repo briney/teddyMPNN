@@ -514,7 +514,6 @@ For each structure in the test set:
 We report both overall recovery and interface-only recovery, stratified by:
 - Dataset source (teddymer, NVIDIA, PDB)
 - Interface size (small/medium/large)
-- CATH classification (for teddymer)
 
 ### 2. Binding affinity prediction (ddG)
 
