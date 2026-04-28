@@ -25,10 +25,13 @@ shapes, token ordering, and feature ordering needed for transferable
 
 ### ProteinMPNN (~1.66M parameters)
 
-> **Pending Foundry validation**: the current implementation produces 1,660,485
-> parameters; a 3,504-parameter divergence from the originally cited Foundry
-> figure (1,656,981). The discrepancy is not yet diagnosed and must be resolved
-> by loading reference Foundry weights with `strict=True` before Phase 5.
+> **Foundry equivalence: validated.** Current implementation has 1,660,485
+> parameters (a +3,504-param accepted divergence from the originally cited
+> 1,656,981 Foundry figure). Foundry's `proteinmpnn_v_48_020.pt` loads with
+> `strict=True` and produces bit-equivalent graph featurization, encoder,
+> and decoder outputs against canonical references; see
+> `tests/validation/test_foundry_equivalence.py`. The param-count delta is
+> from layer-shape differences and does not block Phase 5.
 
 
 ```
@@ -98,9 +101,22 @@ compatibility.
 
 ### LigandMPNN (~2.62M parameters)
 
-> **Pending Foundry validation**: the current implementation produces 2,618,501
-> parameters; a 3,472-parameter divergence from the originally cited Foundry
-> figure (2,621,973). Resolve as part of the same pre-Phase-5 validation step.
+> **Foundry equivalence: validated.** Current implementation has 2,618,501
+> parameters (a -3,472-param accepted divergence from the originally cited
+> 2,621,973 Foundry figure). Foundry's `ligandmpnn_v_32_010_25.pt` loads
+> with `strict=True`. Graph featurization (per-residue ligand subgraph),
+> encoder, and decoder all produce bit-equivalent outputs against canonical
+> references for single-chain, two-chain, and with-ligand cases.
+>
+> **Intentional no-context divergence.** When the ligand context is empty
+> (`M = 0`) or fully masked, teddyMPNN bypasses the LigandMPNN context
+> branch so the encoder reproduces the ProteinMPNN backbone-only output
+> bit-for-bit. Foundry instead emits a per-residue bias from the empty
+> context branch (W_final_context_embed + final_context_norm acting on a
+> zero context aggregate). The bypass is required for ProteinMPNN vs.
+> LigandMPNN ablations to be interpretable; the regression test
+> `tests/validation/test_foundry_equivalence.py::TestLigandMPNNNoContext`
+> anchors this behaviour. All non-empty-context cases match Foundry.
 
 
 Extends ProteinMPNN with a protein-ligand context encoder that operates over

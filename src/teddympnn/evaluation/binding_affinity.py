@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 import re
 from pathlib import Path  # noqa: TC003 — used at runtime in predict_ddg signature
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import torch
 
@@ -24,6 +24,9 @@ from teddympnn.evaluation._batch import (
     load_eval_features,
 )
 from teddympnn.models.ligand_mpnn import LigandMPNN
+
+if TYPE_CHECKING:
+    from teddympnn.models.protein_mpnn import ProteinMPNN
 from teddympnn.models.tokens import (
     AMINO_ACIDS_1TO3,
     idx_to_token,
@@ -144,7 +147,7 @@ def _map_mask_to_chain(
 
 @torch.no_grad()
 def score_structure(
-    model: torch.nn.Module,
+    model: ProteinMPNN,
     input_features: dict[str, torch.Tensor],
     score_mask: torch.Tensor,
     seed: int,
@@ -189,7 +192,7 @@ def score_structure(
 
 @torch.no_grad()
 def score_complex(
-    model: torch.nn.Module,
+    model: ProteinMPNN,
     structure_path: str | Path,
     *,
     designed_chains: list[str] | None = None,
@@ -271,7 +274,7 @@ def score_complex(
 
 @torch.no_grad()
 def predict_ddg(
-    model: torch.nn.Module,
+    model: ProteinMPNN,
     structure_path: str | Path,
     mutations: dict[str, dict[str, str | None]],
     num_samples: int = 20,

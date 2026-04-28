@@ -148,8 +148,11 @@ class TestProteinFeaturesLigand:
         assert "ligand_subgraph_nodes" in result
         assert "ligand_subgraph_edges" in result
         assert "ligand_subgraph_Y_m" in result
-        assert result["E_protein_to_ligand"].shape[-1] == 128
-        assert result["ligand_subgraph_nodes"].shape == (B, N_atoms, 128)
+        Kc = min(pfl.num_context_atoms, N_atoms)
+        assert result["E_protein_to_ligand"].shape == (B, L, Kc, 128)
+        assert result["ligand_subgraph_nodes"].shape == (B, L, Kc, 128)
+        assert result["ligand_subgraph_edges"].shape == (B, L, Kc, Kc, 128)
+        assert result["ligand_subgraph_Y_m"].shape == (B, L, Kc)
 
     def test_additional_attribute_names(self) -> None:
         pfl = ProteinFeaturesLigand()
@@ -182,8 +185,14 @@ class TestProteinFeaturesLigand:
         Y_t = torch.zeros(B, N_atoms, dtype=torch.long)
 
         result = pfl(X, mask, R_idx, chain, Y, Y_m, Y_t)
-        # Masked atoms should produce zero features
-        assert torch.allclose(
-            result["ligand_subgraph_nodes"],
-            torch.zeros_like(result["ligand_subgraph_nodes"]),
+        # Foundry semantics: featurization doesn't zero invalid-atom node/edge
+        # embeddings; downstream message passing masks via ligand_subgraph_Y_m.
+        # The propagated mask must be all-zero.
+        assert torch.equal(
+            result["ligand_subgraph_Y_m"],
+            torch.zeros_like(result["ligand_subgraph_Y_m"]),
+        )
+        assert torch.equal(
+            result["ligand_subgraph_Y_m_edges"],
+            torch.zeros_like(result["ligand_subgraph_Y_m_edges"]),
         )

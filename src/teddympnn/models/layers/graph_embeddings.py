@@ -9,7 +9,7 @@ and an intraligand subgraph for LigandMPNN.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 import torch
 import torch.nn.functional as F
@@ -627,10 +627,12 @@ class ProteinFeaturesLigand(ProteinFeatures):
             atom_types.clamp(0, NUM_ELEMENT_TYPES - 1), num_classes=NUM_ELEMENT_TYPES
         ).float()
         # Periodic table group: (..., 19)
-        groups = self.periodic_table_groups[atom_types.clamp(0, NUM_ELEMENT_TYPES - 1)]
+        groups_table = cast("torch.Tensor", self.periodic_table_groups)
+        groups = groups_table[atom_types.clamp(0, NUM_ELEMENT_TYPES - 1)]
         group_onehot = F.one_hot(groups, num_classes=NUM_PERIODIC_GROUPS).float()
         # Periodic table period: (..., 8)
-        periods = self.periodic_table_periods[atom_types.clamp(0, NUM_ELEMENT_TYPES - 1)]
+        periods_table = cast("torch.Tensor", self.periodic_table_periods)
+        periods = periods_table[atom_types.clamp(0, NUM_ELEMENT_TYPES - 1)]
         period_onehot = F.one_hot(periods, num_classes=NUM_PERIODIC_PERIODS).float()
         # Concatenate: (..., 146)
         return torch.cat([elem_onehot, group_onehot, period_onehot], dim=-1)
@@ -639,35 +641,57 @@ class ProteinFeaturesLigand(ProteinFeatures):
         self,
         X: torch.Tensor,
         Y_coords: torch.Tensor,
+        eps: float = 1e-8,
     ) -> torch.Tensor:
-        """Compute angle features between backbone and context atoms.
+        """Spherical-frame angle features for context atoms.
 
-        Computes sin/cos of the angle at CA between N-CA-context and
-        C-CA-context directions.
+        Builds a residue-local orthonormal basis at CA from the N-CA and C-CA
+        bond vectors, then expresses each context atom as (azimuthal, inclination)
+        and returns ``[cos_az, sin_az, cos_incl, sin_incl]``.
 
         Args:
             X: Backbone coordinates [N, CA, C, O], shape ``(B, L, 4, 3)``.
-            Y_coords: Context atom coordinates, shape ``(B, L, Kc, 3)``.
+            Y_coords: Context atom coordinates, shape ``(B, L, M, 3)``.
+            eps: Small value added to distances to avoid divide-by-zero.
 
         Returns:
-            Angle features, shape ``(B, L, Kc, 4)``.
+            Angle features, shape ``(B, L, M, 4)``.
         """
         N = X[:, :, 0, :]  # (B, L, 3)
         CA = X[:, :, 1, :]  # (B, L, 3)
         C = X[:, :, 2, :]  # (B, L, 3)
 
-        # Directions from CA
-        v1 = F.normalize(N - CA, dim=-1).unsqueeze(2)  # (B, L, 1, 3)
-        v2 = F.normalize(C - CA, dim=-1).unsqueeze(2)  # (B, L, 1, 3)
-        vy = F.normalize(Y_coords - CA.unsqueeze(2), dim=-1)  # (B, L, Kc, 3)
+        # Foundry: bond_1 = N - CA, bond_2 = C - CA (center=CA, atom_1=N, atom_2=C)
+        bond_1 = N - CA
+        bond_2 = C - CA
 
-        # cos/sin of angles via dot/cross products
-        cos1 = (v1 * vy).sum(dim=-1)  # (B, L, Kc)
-        cos2 = (v2 * vy).sum(dim=-1)
-        sin1 = torch.cross(v1.expand_as(vy), vy, dim=-1).norm(dim=-1)
-        sin2 = torch.cross(v2.expand_as(vy), vy, dim=-1).norm(dim=-1)
+        # Orthonormal basis in the residue-local frame.
+        basis_1 = F.normalize(bond_1, dim=-1)  # (B, L, 3)
+        proj = (basis_1 * bond_2).sum(dim=-1, keepdim=True)  # (B, L, 1)
+        bond_2_orth = bond_2 - basis_1 * proj
+        basis_2 = F.normalize(bond_2_orth, dim=-1)
+        basis_3 = torch.cross(basis_1, basis_2, dim=-1)
 
-        return torch.stack([cos1, sin1, cos2, sin2], dim=-1)  # (B, L, Kc, 4)
+        # Rotation matrix with basis vectors as columns: R = [b1 | b2 | b3].
+        R = torch.stack([basis_1, basis_2, basis_3], dim=-1)  # (B, L, 3, 3)
+
+        # Local coordinates: Y_local = R^T @ (Y - CA).
+        # einsum "blqp, blyq -> blyp" -> Y_local[b,l,y,p] = sum_q R[b,l,q,p]*(Y-CA)[b,l,y,q].
+        Y_local = torch.einsum(
+            "blqp, blyq -> blyp",
+            R,
+            Y_coords - CA.unsqueeze(2),
+        )
+
+        rho_xy = torch.sqrt(Y_local[..., 0] ** 2 + Y_local[..., 1] ** 2 + eps)
+        rho = torch.norm(Y_local, dim=-1) + eps
+
+        cos_az = Y_local[..., 0] / rho_xy
+        sin_az = Y_local[..., 1] / rho_xy
+        cos_incl = rho_xy / rho
+        sin_incl = Y_local[..., 2] / rho
+
+        return torch.stack([cos_az, sin_az, cos_incl, sin_incl], dim=-1)
 
     def forward(  # type: ignore[override]
         self,
@@ -711,12 +735,11 @@ class ProteinFeaturesLigand(ProteinFeatures):
         N_atoms = Y.shape[1]
         if N_atoms == 0:
             empty_p2l = X.new_zeros(B, L, 0, self.hidden_dim)
-            empty_nodes = X.new_zeros(B, 0, self.hidden_dim)
-            empty_edges = X.new_zeros(B, 0, 0, self.hidden_dim)
-            empty_mask_context = Y_m.new_zeros(B, L, 0)
-            empty_mask_edges = Y_m.new_zeros(B, 0, 0)
+            empty_nodes = X.new_zeros(B, L, 0, self.hidden_dim)
+            empty_edges = X.new_zeros(B, L, 0, 0, self.hidden_dim)
+            empty_mask_context = Y_m.new_zeros(B, L, 0).float()
+            empty_mask_edges = Y_m.new_zeros(B, L, 0, 0).float()
             empty_idx_context = torch.zeros(B, L, 0, dtype=torch.long, device=X.device)
-            empty_idx_edges = torch.zeros(B, 0, 0, dtype=torch.long, device=X.device)
             result.update(
                 {
                     "E_protein_to_ligand": empty_p2l,
@@ -724,7 +747,6 @@ class ProteinFeaturesLigand(ProteinFeatures):
                     "ligand_subgraph_edges": empty_edges,
                     "ligand_subgraph_Y_m": empty_mask_context,
                     "ligand_subgraph_Y_m_edges": empty_mask_edges,
-                    "ligand_subgraph_E_idx": empty_idx_edges,
                     "Y_idx": empty_idx_context,
                 }
             )
@@ -761,14 +783,14 @@ class ProteinFeaturesLigand(ProteinFeatures):
         )
 
         # --- Protein-to-ligand edge features ---
-        # RBF from 5 backbone atoms to each context atom: (B, L, Kc, 80)
+        # RBF from 5 backbone+virtual atoms to each context atom: (B, L, Kc, 5, num_rbf)
         atoms_5 = torch.cat([X_noisy, compute_virtual_cb(X_noisy)], dim=-2)  # (B, L, 5, 3)
-        p2l_rbf_list = []
-        for a in range(5):
-            src = atoms_5[:, :, a, :]  # (B, L, 3)
-            dist = (src.unsqueeze(2) - Y_context).norm(dim=-1)  # (B, L, Kc)
-            p2l_rbf_list.append(rbf_encode(dist, num_rbf=self.num_rbf))
-        p2l_rbf = torch.cat(p2l_rbf_list, dim=-1)  # (B, L, Kc, 80)
+        # (B, L, 1, 5, 3) - (B, L, Kc, 1, 3) -> (B, L, Kc, 5)
+        dist = torch.sqrt(((atoms_5.unsqueeze(2) - Y_context.unsqueeze(3)) ** 2).sum(dim=-1) + 1e-6)
+        rbf_pair = rbf_encode(dist, num_rbf=self.num_rbf)  # (B, L, Kc, 5, num_rbf)
+        # Mask RBF features per-pair: zero out pairs touching invalid ligand atoms.
+        rbf_pair = rbf_pair * Y_m_context.float().unsqueeze(-1).unsqueeze(-1)
+        p2l_rbf = rbf_pair.reshape(B, L, Kc, 5 * self.num_rbf)
 
         # Atom type embedding: (B, L, Kc, 146) → (B, L, Kc, 64)
         atom_type_raw = self._encode_atom_type(Y_t_context)
@@ -780,42 +802,26 @@ class ProteinFeaturesLigand(ProteinFeatures):
         # Concatenate and project: (B, L, Kc, 148) → (B, L, Kc, 128)
         p2l_features = torch.cat([p2l_rbf, atom_type_embed, angles], dim=-1)
         E_protein_to_ligand = self.node_norm(self.node_embedding(p2l_features))
-        E_protein_to_ligand = E_protein_to_ligand * Y_m_context.unsqueeze(-1)
 
-        # --- Ligand subgraph nodes ---
-        # Global atom type features for all ligand atoms: (B, N, 146) → (B, N, 128)
-        atom_type_all = self._encode_atom_type(Y_t)
+        # --- Per-residue ligand subgraph nodes ---
+        # Atom type one-hot for the per-residue subgraph atoms: (B, L, Kc, 146) -> (B, L, Kc, H).
+        atom_type_per_res = self._encode_atom_type(Y_t_context)
         ligand_nodes = self.ligand_subgraph_node_norm(
-            self.ligand_subgraph_node_embedding(atom_type_all)
+            self.ligand_subgraph_node_embedding(atom_type_per_res)
         )
-        ligand_nodes = ligand_nodes * Y_m.unsqueeze(-1)
 
-        # --- Ligand subgraph edges ---
-        # Inter-atom distances for k-NN within ligand: (B, N, N)
-        y_diff = Y.unsqueeze(2) - Y.unsqueeze(1)
-        y_dist = y_diff.norm(dim=-1)
-        y_dist = y_dist + (~Y_m.bool()).unsqueeze(1).float() * 1e6
-
-        Ke = min(self.num_context_atoms, N_atoms)
-        _, Y_edges_idx = y_dist.topk(Ke, dim=-1, largest=False)
-
-        # RBF for intraligand edges: (B, N, Ke, 16) → (B, N, Ke, 128)
-        y_neighbor_coords = torch.gather(
-            Y.unsqueeze(2).expand(B, N_atoms, Ke, 3),
-            1,
-            Y_edges_idx.unsqueeze(-1).expand(B, N_atoms, Ke, 3),
-        )
-        y_edge_dist = (Y.unsqueeze(2) - y_neighbor_coords).norm(dim=-1)
-        y_edge_rbf = rbf_encode(y_edge_dist, num_rbf=self.num_rbf)
+        # --- Per-residue ligand subgraph edges ---
+        # Pairwise distances within each residue's M-atom subgraph: (B, L, Kc, Kc).
+        y_pair_diff = Y_context.unsqueeze(3) - Y_context.unsqueeze(2)
+        y_pair_dist = torch.sqrt((y_pair_diff**2).sum(dim=-1) + 1e-6)
+        y_pair_rbf = rbf_encode(y_pair_dist, num_rbf=self.num_rbf)
+        # Mask invalid pairs (either endpoint missing): (B, L, Kc, Kc, 1).
+        Y_m_context_f = Y_m_context.float()
+        Y_m_edges = Y_m_context_f.unsqueeze(-1) * Y_m_context_f.unsqueeze(-2)
+        y_pair_rbf = y_pair_rbf * Y_m_edges.unsqueeze(-1)
         ligand_edges = self.ligand_subgraph_edge_norm(
-            self.ligand_subgraph_edge_embedding(y_edge_rbf)
+            self.ligand_subgraph_edge_embedding(y_pair_rbf)
         )
-        Y_m_edges = torch.gather(
-            Y_m.unsqueeze(2).expand(B, N_atoms, Ke),
-            1,
-            Y_edges_idx,
-        )
-        ligand_edges = ligand_edges * Y_m_edges.unsqueeze(-1)
 
         result.update(
             {
@@ -824,7 +830,6 @@ class ProteinFeaturesLigand(ProteinFeatures):
                 "ligand_subgraph_edges": ligand_edges,
                 "ligand_subgraph_Y_m": Y_m_context,
                 "ligand_subgraph_Y_m_edges": Y_m_edges,
-                "ligand_subgraph_E_idx": Y_edges_idx,
                 "Y_idx": Y_idx,
             }
         )

@@ -155,28 +155,32 @@ class LigandMPNN(ProteinMPNN):
 
         mask_V = input_features["residue_mask"].float()
 
-        # Extract ligand graph features
-        E_protein_to_ligand = graph_features["E_protein_to_ligand"]
-        ligand_nodes = graph_features["ligand_subgraph_nodes"]
-        ligand_edges = graph_features["ligand_subgraph_edges"]
-        Y_m_context = graph_features["ligand_subgraph_Y_m"]
-        Y_m_edges = graph_features["ligand_subgraph_Y_m_edges"]
+        # Extract ligand graph features (all per-residue).
+        E_protein_to_ligand = graph_features["E_protein_to_ligand"]  # (B, L, M, H)
+        ligand_nodes = graph_features["ligand_subgraph_nodes"]  # (B, L, M, H)
+        ligand_edges = graph_features["ligand_subgraph_edges"]  # (B, L, M, M, H)
+        # Per-residue ligand mask: prefer input_features (Foundry contract),
+        # fall back to graph_features (our forward path).
+        if "ligand_subgraph_Y_m" in input_features:
+            Y_m_context = input_features["ligand_subgraph_Y_m"].float()
+        else:
+            Y_m_context = graph_features["ligand_subgraph_Y_m"].float()
+        if "ligand_subgraph_Y_m_edges" in graph_features:
+            Y_m_edges = graph_features["ligand_subgraph_Y_m_edges"].float()
+        else:
+            Y_m_edges = Y_m_context.unsqueeze(-1) * Y_m_context.unsqueeze(-2)
         valid_context = Y_m_context.bool().any(dim=-1).float().unsqueeze(-1)
 
-        # Embed ligand features
+        # Embed ligand features.
         h_E_p2l = self.W_protein_to_ligand_edges_embed(E_protein_to_ligand)
         h_V_context = self.W_protein_encoding_embed(h_V)
         h_nodes = self.W_ligand_nodes_embed(ligand_nodes)
         h_edges = self.W_ligand_edges_embed(ligand_edges)
 
-        # Masks for ligand atoms
-        Y_m_float = input_features["Y_m"].float()
-        Y_idx = graph_features["Y_idx"]
-
-        # Interleaved context encoding
+        # Interleaved per-residue context encoding (matches Foundry).
         for i in range(len(self.ligand_context_encoder_layers)):
-            # --- Intraligand message passing ---
-            # Pass only edge features (H); DecLayer prepends source (H) → 2H
+            # --- Per-residue intraligand message passing ---
+            # Pass only edge features (H); DecLayer prepends source (H) → 2H.
             # NOTE: Foundry does NOT concatenate destination node features here
             # (documented as a bug in the original LigandMPNN, but preserved
             # for weight compatibility).
@@ -185,7 +189,7 @@ class LigandMPNN(ProteinMPNN):
                     self.ligand_context_encoder_layers[i],
                     h_nodes,
                     h_edges,
-                    Y_m_float,
+                    Y_m_context,
                     Y_m_edges,
                     use_reentrant=False,
                 )
@@ -193,21 +197,13 @@ class LigandMPNN(ProteinMPNN):
                 h_nodes = self.ligand_context_encoder_layers[i](
                     h_nodes,
                     h_edges,
-                    Y_m_float,
+                    Y_m_context,
                     Y_m_edges,
                 )
 
             # --- Protein-to-ligand context message passing ---
-            # Gather updated ligand nodes at context atom indices: (B, L, Kc, H)
-            h_context_nodes = torch.gather(
-                h_nodes.unsqueeze(1).expand(-1, h_V.shape[1], -1, -1),
-                dim=2,
-                index=Y_idx.unsqueeze(-1).expand(-1, -1, -1, self.hidden_dim),
-            )
-
-            # Neighbor features: cat(p2l_edge, context_nodes) = 2H
-            # DecLayer prepends source h_V_context → 3H total
-            h_E_context = torch.cat([h_E_p2l, h_context_nodes], dim=-1)  # (B, L, Kc, 2H)
+            # Direct concat of per-residue p2l edges with per-residue ligand nodes.
+            h_E_context = torch.cat([h_E_p2l, h_nodes], dim=-1)  # (B, L, M, 2H)
 
             if self.use_gradient_checkpointing and self.training:
                 h_V_context = gradient_checkpoint(
