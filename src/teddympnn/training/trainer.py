@@ -64,6 +64,11 @@ class Trainer:
         val_loader: DataLoader[dict[str, Any]] | Any | None = None,
         device: torch.device | None = None,
     ) -> None:
+        # Pydantic's apply_model_defaults populates these from model_type.
+        assert config.structure_noise is not None
+        assert config.token_budget is not None
+        assert config.pretrained_weights is not None
+        assert config.model.hidden_dim is not None
         self.config = config
         self.rank = int(os.environ.get("RANK", "0"))
         self.local_rank = int(os.environ.get("LOCAL_RANK", "0"))
@@ -152,15 +157,19 @@ class Trainer:
         rank = int(os.environ.get("RANK", "0"))
         world_size = int(os.environ.get("WORLD_SIZE", "1"))
 
+        # Pydantic's apply_model_defaults populates these from model_type.
+        assert config.token_budget is not None
+        assert config.pretrained_weights is not None
+
         # Build model
-        is_ligand = config.model.model_type == "ligand_mpnn"
+        is_ligand = config.model_type == "ligand_mpnn"
         model_cls = LigandMPNN if is_ligand else ProteinMPNN
         model_kwargs: dict[str, Any] = {
             "hidden_dim": config.model.hidden_dim,
             "num_encoder_layers": config.model.num_encoder_layers,
             "num_decoder_layers": config.model.num_decoder_layers,
             "num_neighbors": config.model.num_neighbors,
-            "dropout": config.model.dropout_rate,
+            "dropout": config.model.dropout,
         }
         if is_ligand:
             model_kwargs["num_context_atoms"] = config.model.num_context_atoms
@@ -173,10 +182,10 @@ class Trainer:
         # Build datasets
         collator = PaddingCollator()
         datasets = []
-        weights = []
-        for src in config.data_sources:
+        ratios = []
+        for ds_cfg in config.data.train.values():
             ds = PPIDataset(
-                manifest_path=src.path,
+                manifest_path=ds_cfg.path,
                 max_residues=config.max_residues,
                 min_interface_contacts=config.min_interface_contacts,
                 include_ligand_atoms=is_ligand,
@@ -187,11 +196,11 @@ class Trainer:
                 ),
             )
             datasets.append(ds)
-            weights.append(src.weight)
+            ratios.append(ds_cfg.ratio)
 
         train_loader = MixedDataLoader(
             datasets=datasets,
-            weights=weights,
+            weights=ratios,
             token_budget=config.token_budget,
             num_workers=config.num_workers,
             collate_fn=collator,
@@ -201,12 +210,12 @@ class Trainer:
         )
 
         val_loader = None
-        if config.validation_data_sources:
+        if config.data.validation:
             val_datasets = []
-            val_weights = []
-            for src in config.validation_data_sources:
+            val_ratios = []
+            for ds_cfg in config.data.validation.values():
                 ds = PPIDataset(
-                    manifest_path=src.path,
+                    manifest_path=ds_cfg.path,
                     max_residues=config.max_residues,
                     min_interface_contacts=config.min_interface_contacts,
                     include_ligand_atoms=is_ligand,
@@ -215,10 +224,10 @@ class Trainer:
                     sidechain_atomization_per_residue_probability=1.0,
                 )
                 val_datasets.append(ds)
-                val_weights.append(src.weight)
+                val_ratios.append(ds_cfg.ratio)
             val_loader = MixedDataLoader(
                 datasets=val_datasets,
-                weights=val_weights,
+                weights=val_ratios,
                 token_budget=config.token_budget,
                 num_workers=config.num_workers,
                 collate_fn=collator,
@@ -229,8 +238,8 @@ class Trainer:
             )
         elif config.eval_every_n_steps and config.eval_every_n_steps < config.max_steps:
             logger.warning(
-                "eval_every_n_steps=%d is set but no validation_data_sources are "
-                "configured; validation will be skipped.",
+                "eval_every_n_steps=%d is set but data.validation is empty; "
+                "validation will be skipped.",
                 config.eval_every_n_steps,
             )
 
@@ -418,7 +427,7 @@ class Trainer:
             scheduler=self.scheduler,
             step=step,
             config=self.config.model_dump(mode="json"),
-            model_family=self.config.model.model_type,
+            model_family=self.config.model_type,
         )
         logger.info("Saved checkpoint at step %d to %s", step, path)
         return path

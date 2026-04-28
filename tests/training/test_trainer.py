@@ -9,7 +9,7 @@ import torch
 if TYPE_CHECKING:
     from pathlib import Path
 
-from teddympnn.config import DataSourceConfig, ModelConfig, TrainingConfig
+from teddympnn.config import DataConfig, DatasetConfig, ModelConfig, TrainingConfig
 from teddympnn.models.protein_mpnn import ProteinMPNN
 from teddympnn.training.trainer import Trainer
 
@@ -33,19 +33,17 @@ def _make_batch(B: int = 2, L: int = 20, device: str = "cpu") -> dict[str, torch
 def _make_tiny_config(tmp_path: Path) -> TrainingConfig:
     """Create a minimal training config for testing."""
     return TrainingConfig(
+        model_type="protein_mpnn",
         model=ModelConfig(
-            model_type="protein_mpnn",
             hidden_dim=32,
             num_encoder_layers=1,
             num_decoder_layers=1,
             num_neighbors=10,
         ),
         pretrained_weights=tmp_path / "dummy.pt",
-        data_sources=[
-            DataSourceConfig(
-                name="test", weight=1.0, path=tmp_path / "manifest.tsv", source_type="pdb"
-            ),
-        ],
+        data=DataConfig(
+            train={"pdb": DatasetConfig(path=tmp_path / "manifest.tsv", ratio=1.0)},
+        ),
         max_steps=10,
         log_every_n_steps=5,
         eval_every_n_steps=5,

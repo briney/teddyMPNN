@@ -781,54 +781,43 @@ Checkpoint resume:
 
 **Pydantic models:**
 ```python
-class DataSourceConfig(BaseModel):
-    name: str
-    weight: float
+SourceType = Literal["teddymer", "nvidia", "pdb"]
+
+class DatasetConfig(BaseModel):
     path: Path
-    source_type: Literal["teddymer", "nvidia", "pdb"]
+    ratio: float
+
+class DataConfig(BaseModel):
+    train: dict[SourceType, DatasetConfig]
+    validation: dict[SourceType, DatasetConfig] = Field(default_factory=dict)
 
 class ModelConfig(BaseModel):
-    model_type: Literal["protein_mpnn", "ligand_mpnn"]
-    hidden_dim: int = 128
-    num_encoder_layers: int = 3
-    num_decoder_layers: int = 3
-    num_neighbors: int = 48  # 32 for LigandMPNN
-    num_context_atoms: int = 25  # LigandMPNN only
-    dropout_rate: float = 0.1
+    # All fields default to None; populated from model_type at the
+    # TrainingConfig level by inspecting ProteinMPNN / LigandMPNN __init__.
+    hidden_dim: int | None = None
+    num_encoder_layers: int | None = None
+    num_decoder_layers: int | None = None
+    num_neighbors: int | None = None
+    dropout: float | None = None
+    num_context_atoms: int | None = None  # ligand_mpnn only
 
 class TrainingConfig(BaseModel):
-    model: ModelConfig
-    pretrained_weights: Path
-    data_sources: list[DataSourceConfig]
-    token_budget: int = 10_000
-    max_residues: int = 6_000
-    min_interface_contacts: int = 4
-    learning_rate_factor: float = 2.0
-    warmup_steps: int = 4_000
-    max_steps: int = 300_000
+    model_type: Literal["protein_mpnn", "ligand_mpnn"] = "protein_mpnn"
+    model: ModelConfig = Field(default_factory=ModelConfig)
+    pretrained_weights: Path | None = None  # None => packaged default for model_type
+    data: DataConfig
+    # Model-tuned training knobs — defaulted from model_type when None.
+    token_budget: int | None = None
+    structure_noise: float | None = None
     grad_clip_max_norm: float | None = None
-    structure_noise: float = 0.2
-    label_smoothing: float = 0.1
-    mixed_precision: bool = True
-    gradient_checkpointing: bool = True
-    num_workers: int = 8
-    seed: int = 42
-    log_every_n_steps: int = 100
-    eval_every_n_steps: int = 5_000
-    save_every_n_steps: int = 10_000
-    output_dir: Path = Path("outputs")
-    wandb_project: str | None = None
-
-class EvalConfig(BaseModel):
-    checkpoint: Path
-    data_path: Path
-    metrics: list[Literal["recovery", "interface_recovery", "ddg"]]
-    num_samples: int = 20  # for ddG Monte Carlo averaging
-    skempi_path: Path | None = None
+    # ...other plain training knobs...
 ```
 
-- Load from YAML: `TrainingConfig.model_validate(yaml.safe_load(open(path)))`
-- Sensible defaults for both ProteinMPNN and LigandMPNN
+- Load from YAML + CLI overrides: `load_training_config(yaml_path, overrides)`
+  uses OmegaConf for parsing and merging, then Pydantic for validation.
+- ``model_type`` drives architecture defaults (pulled from each model class's
+  ``__init__`` signature), the three model-tuned training knobs, and the
+  packaged-weights path.
 
 **Tests:**
 - Valid YAML loads correctly

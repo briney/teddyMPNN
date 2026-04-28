@@ -94,7 +94,7 @@ Specific gaps:
 
 - `MixedDataLoader._build_sampler` constructs a `WeightedRandomSampler`, but
   never uses it. The active sampler is a `TokenBudgetBatchSampler` over the
-  concatenated lengths, so `DataSourceConfig.weight` has no effect.
+  concatenated lengths, so `DatasetConfig.ratio` has no effect.
 - The provided run configs point all sources at the same
   `data/manifests/train_manifest.tsv`. Because `PPIDataset` does not filter by
   the `source` column or `source_type`, the "teddymer", "nvidia", and "pdb"
@@ -111,7 +111,7 @@ views. That directly compromises any Phase 5 benchmark interpretation.
 **Proposed fix:**
 
 1. Choose one clear data-loading design:
-   either source-specific manifests per `DataSourceConfig`, or one unified
+   either source-specific manifests per `data.train` entry, or one unified
    manifest with an explicit source filter in `PPIDataset`.
 2. Replace `MixedDataLoader` with a source-aware batch sampler that actually
    samples according to configured weights while still respecting token budgets.

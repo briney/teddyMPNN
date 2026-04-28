@@ -153,16 +153,29 @@ def pretrained(
 # ---------------------------------------------------------------------------
 
 
-@app.command()
+@app.command(
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+)
 def train(
-    config: Annotated[Path, typer.Option(help="Path to training config YAML.")] = ...,  # type: ignore[assignment]
-    resume: Annotated[Path | None, typer.Option(help="Checkpoint to resume from.")] = None,
+    ctx: typer.Context,
+    config: Annotated[
+        Path,
+        typer.Option(help="Path to training config YAML."),
+    ] = Path("configs/train.yaml"),
+    resume: Annotated[
+        Path | None,
+        typer.Option(help="Checkpoint to resume from."),
+    ] = None,
 ) -> None:
-    """Train a teddyMPNN model from a YAML config."""
-    from teddympnn.config import TrainingConfig
+    """Train a teddyMPNN model.
+
+    Extra positional arguments are treated as Hydra-style overrides
+    (e.g. ``model.hidden_dim=256 data.train.teddymer.ratio=0.5``).
+    """
+    from teddympnn.config import load_training_config
     from teddympnn.training.trainer import Trainer
 
-    training_config = TrainingConfig.from_yaml(config)
+    training_config = load_training_config(config, ctx.args)
     trainer = Trainer.from_config(training_config)
 
     if resume is not None:

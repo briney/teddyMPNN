@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import torch
 
 from teddympnn.models.ligand_mpnn import LigandMPNN
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def _make_ligand_input_features(
@@ -77,7 +82,7 @@ class TestLigandMPNNArchitecture:
         model = LigandMPNN()
         assert model.num_neighbors == 32
 
-    def test_num_context_atoms_propagates(self) -> None:
+    def test_num_context_atoms_propagates(self, tmp_path: Path) -> None:
         """``num_context_atoms`` reaches the graph featurization module.
 
         Regression: ``ModelConfig.num_context_atoms`` was previously dropped
@@ -85,16 +90,23 @@ class TestLigandMPNNArchitecture:
         default in place regardless of config. This test exercises the same
         kwargs path that ``Trainer.from_config`` uses.
         """
-        from teddympnn.config import ModelConfig
+        from teddympnn.config import DataConfig, DatasetConfig, ModelConfig, TrainingConfig
 
-        cfg = ModelConfig(model_type="ligand_mpnn", num_context_atoms=16)
+        cfg = TrainingConfig(
+            model_type="ligand_mpnn",
+            model=ModelConfig(num_context_atoms=16),
+            pretrained_weights=tmp_path / "dummy.pt",
+            data=DataConfig(
+                train={"pdb": DatasetConfig(path=tmp_path / "m.tsv", ratio=1.0)},
+            ),
+        )
         model = LigandMPNN(
-            hidden_dim=cfg.hidden_dim,
-            num_encoder_layers=cfg.num_encoder_layers,
-            num_decoder_layers=cfg.num_decoder_layers,
-            num_neighbors=cfg.num_neighbors,
-            dropout=cfg.dropout_rate,
-            num_context_atoms=cfg.num_context_atoms,
+            hidden_dim=cfg.model.hidden_dim,
+            num_encoder_layers=cfg.model.num_encoder_layers,
+            num_decoder_layers=cfg.model.num_decoder_layers,
+            num_neighbors=cfg.model.num_neighbors,
+            dropout=cfg.model.dropout,
+            num_context_atoms=cfg.model.num_context_atoms,
         )
         assert model.graph_featurization_module.num_context_atoms == 16
 

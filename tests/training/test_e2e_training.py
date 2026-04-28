@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 import torch
 
-from teddympnn.config import DataSourceConfig, ModelConfig, TrainingConfig
+from teddympnn.config import DataConfig, DatasetConfig, ModelConfig, TrainingConfig
 from teddympnn.data.collator import PaddingCollator
 from teddympnn.data.features import derive_backbone, parse_structure
 from teddympnn.models import ProteinMPNN
@@ -102,11 +102,11 @@ class TestE2EProteinMPNN:
         manifest_path = _build_manifest(tmp_path)
 
         config = TrainingConfig(
-            model=ModelConfig(model_type="protein_mpnn"),
+            model_type="protein_mpnn",
             pretrained_weights=_PROTEINMPNN_WEIGHTS,
-            data_sources=[
-                DataSourceConfig(name="test", weight=1.0, path=manifest_path, source_type="pdb"),
-            ],
+            data=DataConfig(
+                train={"pdb": DatasetConfig(path=manifest_path, ratio=1.0)},
+            ),
             token_budget=2000,
             max_steps=100,
             warmup_steps=10,
@@ -210,19 +210,17 @@ class TestE2ECPUOnly:
         )
 
         config = TrainingConfig(
+            model_type="protein_mpnn",
             model=ModelConfig(
-                model_type="protein_mpnn",
                 hidden_dim=32,
                 num_encoder_layers=1,
                 num_decoder_layers=1,
                 num_neighbors=10,
             ),
             pretrained_weights=tmp_path / "dummy.pt",
-            data_sources=[
-                DataSourceConfig(
-                    name="test", weight=1.0, path=tmp_path / "m.tsv", source_type="pdb"
-                ),
-            ],
+            data=DataConfig(
+                train={"pdb": DatasetConfig(path=tmp_path / "m.tsv", ratio=1.0)},
+            ),
             max_steps=50,
             warmup_steps=5,
             log_every_n_steps=10,
@@ -266,19 +264,17 @@ class TestE2ECPUOnly:
             hidden_dim=32, num_encoder_layers=1, num_decoder_layers=1, num_neighbors=10
         )
         config = TrainingConfig(
+            model_type="protein_mpnn",
             model=ModelConfig(
-                model_type="protein_mpnn",
                 hidden_dim=32,
                 num_encoder_layers=1,
                 num_decoder_layers=1,
                 num_neighbors=10,
             ),
             pretrained_weights=tmp_path / "dummy.pt",
-            data_sources=[
-                DataSourceConfig(
-                    name="test", weight=1.0, path=tmp_path / "m.tsv", source_type="pdb"
-                ),
-            ],
+            data=DataConfig(
+                train={"pdb": DatasetConfig(path=tmp_path / "m.tsv", ratio=1.0)},
+            ),
             max_steps=5,
             mixed_precision=False,
             gradient_checkpointing=False,

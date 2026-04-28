@@ -323,19 +323,19 @@ Training data is sampled from a configurable mixture of datasets:
 ```yaml
 # Example config
 data:
-  sources:
-    - name: teddymer
-      weight: 0.6
+  train:
+    teddymer:
       path: /data/teddymer/dimers/
-    - name: nvidia_complexes
-      weight: 0.2
+      ratio: 0.6
+    nvidia:
       path: /data/nvidia/filtered/
-    - name: pdb_complexes
-      weight: 0.2
+      ratio: 0.2
+    pdb:
       path: /data/pdb/complexes/
-  token_budget: 10000     # max residues per batch
-  max_residues: 6000      # max residues per structure
-  min_interface_contacts: 4
+      ratio: 0.2
+token_budget: 10000     # max residues per batch (defaulted from model_type)
+max_residues: 6000      # max residues per structure
+min_interface_contacts: 4
 ```
 
 ### Training view generation
@@ -457,15 +457,15 @@ token-budget batches and DDP.
 ### Training configuration
 
 ```python
-@dataclass
-class TrainingConfig:
+class TrainingConfig(BaseModel):
     # Model
     model_type: Literal["protein_mpnn", "ligand_mpnn"]
-    pretrained_weights: Path
+    model: ModelConfig                   # all fields default from model_type when None
+    pretrained_weights: Path | None = None  # None => packaged default for model_type
 
     # Data
-    data_sources: list[DataSourceConfig]
-    token_budget: int = 10_000
+    data: DataConfig                     # data.train / data.validation, keyed by source
+    token_budget: int | None = None      # defaulted from model_type when None
     max_residues: int = 6_000
     min_interface_contacts: int = 4
 

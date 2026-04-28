@@ -89,15 +89,18 @@ teddympnn download prepare-manifests \
 ### 3. Train
 
 ```bash
-# Single run from config
-teddympnn train --config configs/run1_proteinmpnn_full.yaml
+# Default ProteinMPNN run (uses configs/train.yaml)
+teddympnn train
+
+# Switch model — pretrained weights and architecture defaults follow
+teddympnn train model_type=ligand_mpnn output_dir=outputs/ligand_full
+
+# Override individual knobs Hydra-style
+teddympnn train model.hidden_dim=256 max_steps=100000 \
+    data.train.teddymer.ratio=0.8 data.train.pdb.ratio=0.2
 
 # Resume from checkpoint
-teddympnn train --config configs/run1_proteinmpnn_full.yaml \
-    --resume outputs/run1_proteinmpnn_full/checkpoints/step_0050000.pt
-
-# Launch all training runs
-python scripts/launch_training.py
+teddympnn train --resume outputs/train/checkpoints/step_0050000.pt
 ```
 
 ### 4. Benchmark

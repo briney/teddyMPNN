@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+from unittest.mock import patch
+
 from typer.testing import CliRunner
 
 from teddympnn.cli import app
@@ -93,7 +96,50 @@ class TestCLIHelp:
 
 
 class TestTrainCommand:
-    def test_train_missing_config(self) -> None:
-        """train without --config flag fails."""
-        result = runner.invoke(app, ["train"])
-        assert result.exit_code != 0
+    def test_train_default_config_path(self) -> None:
+        """When --config is omitted, the loader is called with configs/train.yaml."""
+        with (
+            patch("teddympnn.config.load_training_config") as mock_load,
+            patch("teddympnn.training.trainer.Trainer.from_config") as mock_from_config,
+        ):
+            mock_load.return_value = object()
+            mock_from_config.return_value.train.return_value = None
+            result = runner.invoke(app, ["train"])
+
+        assert result.exit_code == 0, result.output
+        assert mock_load.called
+        passed_config_path, passed_overrides = mock_load.call_args.args
+        assert passed_config_path == Path("configs/train.yaml")
+        assert passed_overrides == []
+
+    def test_train_passes_overrides(self) -> None:
+        """Extra CLI args are forwarded to the loader as Hydra-style overrides."""
+        with (
+            patch("teddympnn.config.load_training_config") as mock_load,
+            patch("teddympnn.training.trainer.Trainer.from_config") as mock_from_config,
+        ):
+            mock_load.return_value = object()
+            mock_from_config.return_value.train.return_value = None
+            result = runner.invoke(
+                app,
+                ["train", "model.hidden_dim=256", "data.train.teddymer.ratio=0.5"],
+            )
+
+        assert result.exit_code == 0, result.output
+        _passed_config_path, passed_overrides = mock_load.call_args.args
+        assert passed_overrides == ["model.hidden_dim=256", "data.train.teddymer.ratio=0.5"]
+
+    def test_train_explicit_config(self, tmp_path: Path) -> None:
+        """An explicit --config path is forwarded to the loader."""
+        explicit = tmp_path / "explicit.yaml"
+        with (
+            patch("teddympnn.config.load_training_config") as mock_load,
+            patch("teddympnn.training.trainer.Trainer.from_config") as mock_from_config,
+        ):
+            mock_load.return_value = object()
+            mock_from_config.return_value.train.return_value = None
+            result = runner.invoke(app, ["train", "--config", str(explicit)])
+
+        assert result.exit_code == 0, result.output
+        passed_config_path, _ = mock_load.call_args.args
+        assert passed_config_path == explicit
