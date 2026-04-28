@@ -358,7 +358,8 @@ class Trainer:
                 full_interface = torch.zeros_like(res_mask)
                 full_interface[res_mask] = interface
                 designed_interface = designed & full_interface
-                total_iface_correct += ((preds[b] == batch["S"][b]) & designed_interface).sum().item()
+                iface_correct = (preds[b] == batch["S"][b]) & designed_interface
+                total_iface_correct += iface_correct.sum().item()
                 total_iface += designed_interface.sum().item()
 
         if self.is_distributed:

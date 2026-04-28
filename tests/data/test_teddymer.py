@@ -264,7 +264,5 @@ class TestChoppingDerivation:
                 }
             ),
         )
-        df = filter_teddymer_clusters(
-            metadata, tmp_path / "out.tsv", require_chopping=False
-        )
+        df = filter_teddymer_clusters(metadata, tmp_path / "out.tsv", require_chopping=False)
         assert "domain1_chopping" not in df.columns

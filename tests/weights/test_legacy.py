@@ -133,12 +133,10 @@ class TestAtomType120thRoundtrip:
 
     def test_restore_inserts_zero_column(self) -> None:
         state = OrderedDict()
-        state["graph_featurization_module.embed_atom_type_features.weight"] = torch.randn(
-            64, 146
+        state["graph_featurization_module.embed_atom_type_features.weight"] = torch.randn(64, 146)
+        state["graph_featurization_module.ligand_subgraph_node_embedding.weight"] = torch.randn(
+            128, 146
         )
-        state[
-            "graph_featurization_module.ligand_subgraph_node_embedding.weight"
-        ] = torch.randn(128, 146)
 
         _restore_120th_atom_type(state)
 
@@ -148,9 +146,7 @@ class TestAtomType120thRoundtrip:
         ]:
             assert state[key].shape[1] == 147
             # The inserted column at index 119 must be zero.
-            assert torch.equal(
-                state[key][:, 119], torch.zeros(state[key].shape[0])
-            )
+            assert torch.equal(state[key][:, 119], torch.zeros(state[key].shape[0]))
 
     def test_drop_then_restore_is_identity_on_non_119(self) -> None:
         """drop(restore(legacy)) recovers the original input columns
@@ -162,10 +158,7 @@ class TestAtomType120thRoundtrip:
         legacy["graph_featurization_module.embed_atom_type_features.weight"] = w.clone()
 
         _drop_120th_atom_type(legacy)
-        assert (
-            legacy["graph_featurization_module.embed_atom_type_features.weight"].shape[1]
-            == 146
-        )
+        assert legacy["graph_featurization_module.embed_atom_type_features.weight"].shape[1] == 146
         _restore_120th_atom_type(legacy)
         restored = legacy["graph_featurization_module.embed_atom_type_features.weight"]
         assert restored.shape == w.shape
@@ -180,13 +173,11 @@ class TestAtomType120thRoundtrip:
         147-wide atom-type weights.
         """
         state = OrderedDict()
-        state["graph_featurization_module.embed_atom_type_features.weight"] = torch.randn(
-            64, 146
-        )
+        state["graph_featurization_module.embed_atom_type_features.weight"] = torch.randn(64, 146)
         state["graph_featurization_module.embed_atom_type_features.bias"] = torch.randn(64)
-        state[
-            "graph_featurization_module.ligand_subgraph_node_embedding.weight"
-        ] = torch.randn(128, 146)
+        state["graph_featurization_module.ligand_subgraph_node_embedding.weight"] = torch.randn(
+            128, 146
+        )
 
         legacy = convert_to_legacy(state)
         # Keys are renamed by convert_to_legacy; locate them via the legacy schema.

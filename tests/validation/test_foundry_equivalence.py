@@ -215,9 +215,7 @@ class TestLigandMPNNWeightLoading:
         model = LigandMPNN()
         our_keys = set(model.state_dict().keys())
         ref_keys = set(ref["state_dict"].keys())
-        assert our_keys == ref_keys, (
-            f"Key mismatch: {our_keys.symmetric_difference(ref_keys)}"
-        )
+        assert our_keys == ref_keys, f"Key mismatch: {our_keys.symmetric_difference(ref_keys)}"
 
 
 @requires_reference_data
@@ -243,9 +241,7 @@ class TestLigandMPNNGraphFeaturization:
 
         # Backbone neighbor topology and edge features.
         assert torch.equal(result["E_idx"], ref["graph_features"]["E_idx"])
-        torch.testing.assert_close(
-            result["E"], ref["graph_features"]["E"], atol=1e-5, rtol=1e-5
-        )
+        torch.testing.assert_close(result["E"], ref["graph_features"]["E"], atol=1e-5, rtol=1e-5)
         # Ligand context features.
         torch.testing.assert_close(
             result["E_protein_to_ligand"],
@@ -284,9 +280,7 @@ class TestLigandMPNNEncoder:
         with torch.no_grad():
             enc = model.encode(input_features, ref["graph_features"])
 
-        torch.testing.assert_close(
-            enc["h_V"], ref["encoder_features"]["h_V"], atol=1e-5, rtol=1e-5
-        )
+        torch.testing.assert_close(enc["h_V"], ref["encoder_features"]["h_V"], atol=1e-5, rtol=1e-5)
 
     @pytest.mark.parametrize("case", LIGANDMPNN_CASES)
     def test_encoder_h_E(self, case: str) -> None:
@@ -302,9 +296,7 @@ class TestLigandMPNNEncoder:
             enc = model.encode(input_features, ref["graph_features"])
 
         # Same widened tolerance for h_E as ProteinMPNN.
-        torch.testing.assert_close(
-            enc["h_E"], ref["encoder_features"]["h_E"], atol=5e-5, rtol=1e-4
-        )
+        torch.testing.assert_close(enc["h_E"], ref["encoder_features"]["h_E"], atol=5e-5, rtol=1e-4)
 
 
 @requires_reference_data
@@ -363,9 +355,7 @@ class TestLigandMPNNNoContext:
         with torch.no_grad():
             enc = model.encode(input_features, ref["graph_features"])
 
-        torch.testing.assert_close(
-            enc["h_V"], ref["encoder_features"]["h_V"], atol=1e-5, rtol=1e-5
-        )
+        torch.testing.assert_close(enc["h_V"], ref["encoder_features"]["h_V"], atol=1e-5, rtol=1e-5)
 
     def test_no_context_equals_backbone_only(self) -> None:
         ref = load_reference("ligandmpnn_no_context")
@@ -381,6 +371,4 @@ class TestLigandMPNNNoContext:
             backbone = ProteinMPNN.encode(model, input_features, ref["graph_features"])
 
         # Empty context must contribute zero — h_V must equal backbone-only.
-        torch.testing.assert_close(
-            full["h_V"], backbone["h_V"], atol=1e-6, rtol=1e-5
-        )
+        torch.testing.assert_close(full["h_V"], backbone["h_V"], atol=1e-6, rtol=1e-5)

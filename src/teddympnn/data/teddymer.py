@@ -131,16 +131,12 @@ def _derive_chopping_columns(
         df["domain1_chopping"] = df["ted_id1"].map(ted_lookup)
         df["domain2_chopping"] = df["ted_id2"].map(ted_lookup)
         if "uniprot_id" not in cols:
-            df["uniprot_id"] = (
-                df["ted_id1"].astype(str).str.extract(_TED_ID_UNIPROT_RE.pattern)[0]
-            )
+            df["uniprot_id"] = df["ted_id1"].astype(str).str.extract(_TED_ID_UNIPROT_RE.pattern)[0]
         # Drop rows with unresolved choppings.
         n_before = len(df)
         df = df.dropna(subset=["domain1_chopping", "domain2_chopping"]).copy()
         if len(df) < n_before:
-            logger.warning(
-                "Dropped %d rows lacking TED chopping entries", n_before - len(df)
-            )
+            logger.warning("Dropped %d rows lacking TED chopping entries", n_before - len(df))
         return df
 
     msg = (
@@ -486,7 +482,10 @@ def chop_and_assemble_dimers(
                 if future.result():
                     success += 1
                     source_id = str(
-                        row.get("cluster_rep", row.get("cluster_id", row.get("uniprot_id", row.name)))
+                        row.get(
+                            "cluster_rep",
+                            row.get("cluster_id", row.get("uniprot_id", row.name)),
+                        )
                     )
                     manifest_records.append(
                         {

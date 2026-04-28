@@ -291,7 +291,8 @@ def extract_nvidia_structures(
                             out_path = output_dir / out_name
                             out_path.write_bytes(data)
                             extracted += 1
-                            matching = df[df["filename"].astype(str).map(Path).map(lambda p: p.name) == basename]
+                            filenames = df["filename"].astype(str).map(Path).map(lambda p: p.name)
+                            matching = df[filenames == basename]
                             row = matching.iloc[0] if not matching.empty else None
                             source_id = (
                                 str(row.get("model_id", out_name)) if row is not None else out_name

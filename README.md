@@ -9,11 +9,7 @@ recovery, de novo binder design, and binding affinity (ddG) prediction.
 
 ## Installation
 
-```bash
-pip install teddympnn
-```
-
-For development:
+teddyMPNN is not yet published to PyPI. Install from source:
 
 ```bash
 git clone https://github.com/briney/teddympnn.git

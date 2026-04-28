@@ -215,12 +215,8 @@ def _restore_120th_atom_type(
         # Legacy input is [120 element + 19 group + 8 period] = 147.
         if tensor.shape[1] != 146:
             continue
-        zero_col = torch.zeros(
-            tensor.shape[0], 1, dtype=tensor.dtype, device=tensor.device
-        )
-        state_dict[key] = torch.cat(
-            [tensor[:, :119], zero_col, tensor[:, 119:]], dim=1
-        )
+        zero_col = torch.zeros(tensor.shape[0], 1, dtype=tensor.dtype, device=tensor.device)
+        state_dict[key] = torch.cat([tensor[:, :119], zero_col, tensor[:, 119:]], dim=1)
 
 
 def load_legacy_weights(

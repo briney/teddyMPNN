@@ -372,7 +372,9 @@ def prepare_manifests(
         val_source_path = output_dir / "val_pdb.tsv"
         train_norm.to_csv(train_source_path, sep="\t", index=False)
         val_norm.to_csv(val_source_path, sep="\t", index=False)
-        source_paths.append(("pdb", train_source_path, val_source_path, len(train_norm), len(val_norm)))
+        source_paths.append(
+            ("pdb", train_source_path, val_source_path, len(train_norm), len(val_norm))
+        )
 
     if not train_parts:
         msg = "At least one data source manifest must be provided"

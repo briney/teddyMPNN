@@ -378,7 +378,10 @@ def compute_knn(
 def default_side_chain_atom_types() -> torch.Tensor:
     """Return element indices for the 32 side-chain atom slots."""
     return torch.tensor(
-        [_ELEMENT_INDEX_BY_SYMBOL.get(name[0].upper(), NUM_ELEMENT_TYPES - 1) for name in SIDE_CHAIN_ATOM_NAMES],
+        [
+            _ELEMENT_INDEX_BY_SYMBOL.get(name[0].upper(), NUM_ELEMENT_TYPES - 1)
+            for name in SIDE_CHAIN_ATOM_NAMES
+        ],
         dtype=torch.long,
     )
 
