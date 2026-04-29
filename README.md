@@ -21,6 +21,19 @@ The editable install is required before running `pytest`, `mypy`, or the
 `teddympnn` CLI from a checkout — the test suite imports the installed
 `teddympnn` package, not the `src/` directory.
 
+### External tools
+
+The teddymer download pipeline shells out to
+[FoldSeek](https://github.com/steineggerlab/foldseek) to extract per-domain
+structures from the bundled structure database. Install it once:
+
+```bash
+mamba install -c conda-forge -c bioconda foldseek
+# or download a static binary from https://github.com/steineggerlab/foldseek/releases
+```
+
+`foldseek` must be on `PATH` when `teddympnn download teddymer` runs.
+
 ## Quick Start
 
 ### Score a structure
@@ -64,7 +77,10 @@ teddympnn evaluate benchmark \
 ### 1. Download data
 
 ```bash
-# Teddymer synthetic dimers (~510K from AFDB domain pairs)
+# Teddymer synthetic dimers (~510K from AFDB domain pairs).
+# Extracts directly from the bundled FoldSeek DB (~50 GB) — no AFDB download.
+# Backbone is PULCHRA-reconstructed from the stored CA trace (~0.5 Å RMSD vs.
+# true AFDB N/CA/C/O). Requires `foldseek` on PATH.
 teddympnn download teddymer --output data/teddymer
 
 # NVIDIA predicted complexes (metadata filtering)

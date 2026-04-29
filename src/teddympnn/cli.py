@@ -45,16 +45,24 @@ def teddymer(
     output: Annotated[Path, typer.Option(help="Output directory for teddymer data.")] = Path(
         "data/teddymer"
     ),
-    workers: Annotated[int, typer.Option(help="Concurrent download workers.")] = 50,
+    workers: Annotated[int, typer.Option(help="Process pool size for dimer assembly.")] = 16,
+    chunk_size: Annotated[int, typer.Option(help="Manifest rows per FoldSeek batch.")] = 50_000,
+    foldseek_threads: Annotated[
+        int | None,
+        typer.Option(help="--threads for foldseek convert2pdb (default: all cores)."),
+    ] = None,
+    foldseek_db: Annotated[
+        Path | None,
+        typer.Option(help="Override path to the FoldSeek DB prefix (no suffix)."),
+    ] = None,
     min_plddt: Annotated[float, typer.Option(help="Min interface pLDDT.")] = 70.0,
     max_pae: Annotated[float, typer.Option(help="Max interface PAE.")] = 10.0,
     min_ifl: Annotated[int, typer.Option(help="Min interface length.")] = 10,
 ) -> None:
     """Download and preprocess teddymer synthetic dimers."""
     from teddympnn.data.teddymer import (
-        chop_and_assemble_dimers,
-        download_afdb_structures,
         download_teddymer_metadata,
+        extract_and_assemble_dimers,
         filter_teddymer_clusters,
     )
 
@@ -67,12 +75,16 @@ def teddymer(
         max_interface_pae=max_pae,
         min_interface_length=min_ifl,
     )
-    download_afdb_structures(manifest_path, output / "afdb", workers=workers)
-    chop_and_assemble_dimers(
+    db_path = foldseek_db or (
+        metadata_dir / "teddymer" / "dir_ted_afdb50_cath_dimerdb" / "ted_afdb50_cath_dimerdb"
+    )
+    extract_and_assemble_dimers(
         manifest_path,
-        output / "afdb",
+        db_path,
         output / "dimers",
+        chunk_size=chunk_size,
         workers=workers,
+        foldseek_threads=foldseek_threads,
     )
     typer.echo(f"Teddymer data prepared in {output}")
 
