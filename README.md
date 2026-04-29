@@ -59,6 +59,38 @@ teddympnn evaluate benchmark \
     --output results/benchmark.json
 ```
 
+## Pretrained weights
+
+The standard ProteinMPNN and LigandMPNN base checkpoints are bundled with the
+package and used as the default fine-tuning starting point. After
+`pip install` they are available immediately — no separate download step is
+required.
+
+| `model_type` | Bundled file | Variant |
+|---|---|---|
+| `protein_mpnn` | `proteinmpnn_v_48_020.pt` | 48 hidden dim, 0.20 Å backbone noise |
+| `ligand_mpnn` | `ligandmpnn_v_32_010_25.pt` | 32 hidden dim, 0.10 Å noise, 25-atom ligand context |
+
+The training config's `pretrained_weights` field defaults from `model_type`. To
+use a different checkpoint, pass it explicitly:
+
+```bash
+# Use the bundled default (selected by model_type)
+teddympnn train model_type=protein_mpnn
+
+# Override with a custom checkpoint
+teddympnn train pretrained_weights=/path/to/custom.pt
+```
+
+The bundled files are redistributed under MIT from
+[dauparas/ProteinMPNN](https://github.com/dauparas/ProteinMPNN) and
+[dauparas/LigandMPNN](https://github.com/dauparas/LigandMPNN); see
+`src/teddympnn/weights/pretrained/NOTICES.md` for full attribution and
+citations. Other noise variants (002/010/020/030 for ProteinMPNN,
+005/010/020/030 for LigandMPNN) can be downloaded on demand from
+`files.ipd.uw.edu` via the existing `teddympnn.weights.io.download_pretrained`
+utility.
+
 ## Training
 
 ### 1. Download data
@@ -71,10 +103,6 @@ teddympnn download teddymer --output data/teddymer
 
 # NVIDIA predicted complexes (metadata filtering)
 teddympnn download nvidia-complexes --output data/nvidia_complexes
-
-# Pretrained weights
-teddympnn download pretrained --model protein_mpnn --noise 020
-teddympnn download pretrained --model ligand_mpnn --noise 010
 ```
 
 ### 2. Prepare train/val manifests
