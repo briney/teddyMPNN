@@ -45,48 +45,47 @@ def teddymer(
     output: Annotated[Path, typer.Option(help="Output directory for teddymer data.")] = Path(
         "data/teddymer"
     ),
-    workers: Annotated[int, typer.Option(help="Process pool size for dimer assembly.")] = 16,
-    chunk_size: Annotated[int, typer.Option(help="Manifest rows per FoldSeek batch.")] = 50_000,
-    foldseek_threads: Annotated[
-        int | None,
-        typer.Option(help="--threads for foldseek convert2pdb (default: all cores)."),
-    ] = None,
-    foldseek_db: Annotated[
+    workers: Annotated[int, typer.Option(help="Concurrent TED-domain download workers.")] = 8,
+    retries: Annotated[int, typer.Option(help="Retry attempts per TED-domain download.")] = 3,
+    timeout: Annotated[
+        float, typer.Option(help="Per-request TED-domain download timeout in seconds.")
+    ] = 60.0,
+    overwrite: Annotated[
+        bool, typer.Option(help="Rebuild existing downloaded/reconstructed files.")
+    ] = False,
+    keep_archive: Annotated[
+        bool,
+        typer.Option(
+            "--keep-archive/--remove-archive",
+            help="Keep or remove teddymer.tar.gz after extraction.",
+        ),
+    ] = True,
+    domain_cache: Annotated[
         Path | None,
-        typer.Option(help="Override path to the FoldSeek DB prefix (no suffix)."),
+        typer.Option(help="Optional directory for caching downloaded TED-domain PDBs."),
     ] = None,
-    min_plddt: Annotated[float, typer.Option(help="Min interface pLDDT.")] = 70.0,
-    max_pae: Annotated[float, typer.Option(help="Max interface PAE.")] = 10.0,
-    min_ifl: Annotated[int, typer.Option(help="Min interface length.")] = 10,
 ) -> None:
-    """Download and preprocess teddymer synthetic dimers."""
-    from teddympnn.data.teddymer import (
-        download_teddymer_metadata,
-        extract_and_assemble_dimers,
-        filter_teddymer_clusters,
-    )
+    """Download and reconstruct teddymer full-atom synthetic dimers."""
+    from teddympnn.data.teddymer import TeddymerPrepareConfig, prepare_teddymer_data
 
-    metadata_dir = download_teddymer_metadata(output / "metadata")
-    manifest_path = output / "filtered_manifest.tsv"
-    filter_teddymer_clusters(
-        metadata_dir,
-        manifest_path,
-        min_interface_plddt=min_plddt,
-        max_interface_pae=max_pae,
-        min_interface_length=min_ifl,
+    result = prepare_teddymer_data(
+        TeddymerPrepareConfig(
+            output_dir=output,
+            workers=workers,
+            retries=retries,
+            timeout_seconds=timeout,
+            overwrite=overwrite,
+            keep_archive=keep_archive,
+            domain_cache_dir=domain_cache,
+        )
     )
-    db_path = foldseek_db or (
-        metadata_dir / "teddymer" / "dir_ted_afdb50_cath_dimerdb" / "ted_afdb50_cath_dimerdb"
+    typer.echo(f"Teddymer metadata: {result.metadata_path}")
+    typer.echo(f"All dimers: {result.all_manifest_path} ({result.all_dimers})")
+    typer.echo(
+        f"Non-singleton dimers: {result.nonsingleton_manifest_path} ({result.nonsingleton_dimers})"
     )
-    extract_and_assemble_dimers(
-        manifest_path,
-        db_path,
-        output / "dimers",
-        chunk_size=chunk_size,
-        workers=workers,
-        foldseek_threads=foldseek_threads,
-    )
-    typer.echo(f"Teddymer data prepared in {output}")
+    if result.failures:
+        typer.echo(f"Failures: {result.failures_path} ({result.failures})")
 
 
 @download_app.command("nvidia-complexes")

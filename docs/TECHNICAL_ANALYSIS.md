@@ -46,16 +46,12 @@ full training.
 `teddympnn download nvidia-complexes`, and the manifest-preparation path produce
 usable training data. The implementation stops short of that contract.
 
-Specific gaps:
+Specific gaps at the time of this analysis:
 
-- `teddympnn download teddymer` downloads metadata and AFDB full-chain PDBs, but
-  does not call `chop_and_assemble_dimers`, so it never creates assembled
-  two-chain dimer structures.
-- `filter_teddymer_clusters` only applies quality filters to the metadata. It
-  does not parse TED domain boundaries into the `domain1_chopping` and
-  `domain2_chopping` fields required by `chop_and_assemble_dimers`, nor does it
-  write the `structure_path`, `chain_A`, `chain_B`, and `source` columns consumed
-  by `PPIDataset`.
+- `teddympnn download teddymer` did not create assembled two-chain dimer
+  structures or a trainable manifest. This has since been replaced with a
+  TED-domain reconstruction pipeline that writes full-atom `all_dimers` and
+  `nonsingleton_dimers` manifests.
 - `teddympnn download nvidia-complexes` downloads and filters metadata only. It
   does not download required chunk tarballs or extract the passing structures.
 - `download_nvidia_chunks(..., workers=4)` is sequential; the `workers` argument
@@ -74,8 +70,8 @@ chains. This is a hard blocker for meaningful training.
 1. Make each source pipeline produce a source-specific training manifest with
    exactly the dataset contract: `structure_path`, `chain_A`, `chain_B`,
    `source`, plus source-specific metadata such as cluster/model/PDB IDs.
-2. Wire the teddymer CLI through the full metadata -> AFDB download -> domain
-   chop -> dimer assembly -> manifest path.
+2. Keep the teddymer CLI wired through the full metadata/source-index ->
+   TED-domain download -> dimer assembly -> manifest path.
 3. Wire the NVIDIA CLI through metadata filtering -> chunk download -> selective
    extraction -> manifest path, and make chunk downloads actually concurrent or
    explicitly document that they are sequential.

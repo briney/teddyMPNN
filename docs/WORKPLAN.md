@@ -498,36 +498,26 @@ Download and preprocess teddymer synthetic dimers.
 1. `download_teddymer_metadata(output_dir)`:
    - Download teddymer.tar.gz from teddymer.steineggerlab.workers.dev
    - Extract cluster.tsv and nonsingletonrep_metadata.tsv
-   - Download TED domain boundary table from Zenodo
 
-2. `filter_teddymer_clusters(metadata_dir, output_path)`:
-   - Parse nonsingletonrep_metadata.tsv
-   - Apply quality filters: InterfacePlddt > 70, AvgIntPAE < 10,
-     InterfaceLength > 10
-   - Cross-reference with TED domain boundary table to get chopping strings
-   - Write filtered manifest (TSV: uniprot_id, domain1_chopping, domain2_chopping,
-     cluster_id, interface_length, ...)
+2. `build_teddymer_indices(extracted_dir, output_dir)`:
+   - Parse `teddymer_repdb.source`, `ted_afdb50_cath_dimerdb.source`, and
+     `nonsingletonrep_metadata.tsv`
+   - Write normalized all-representative and non-singleton representative TSVs
 
-3. `download_afdb_structures(manifest_path, output_dir, workers=50)`:
-   - Extract unique UniProt IDs from manifest
-   - Download full-chain PDBs from
-     `https://alphafold.ebi.ac.uk/files/AF-{UNIPROT}-F1-model_v4.pdb`
-   - Use asyncio + aiohttp for concurrent downloads
-   - Skip already-downloaded files (resume support)
-   - Progress bar via rich
+3. `reconstruct_teddymer_dimers(index_path, output_dir, config)`:
+   - Download full TED-domain PDBs from `ted.cathdb.info/api/v1/files`
+   - Relabel domains as chains A and B
+   - Reset residue numbering per chain
+   - Write assembled full-atom dimer PDBs and a training manifest
 
-4. `chop_and_assemble_dimers(manifest_path, afdb_dir, output_dir, workers=50)`:
-   - For each entry in manifest:
-     - Chop domain A from full-chain PDB using domain1_chopping
-     - Chop domain B using domain2_chopping
-     - Relabel chains (A and B)
-     - Reset residue numbering per chain
-     - Write assembled dimer PDB
-   - Use multiprocessing for CPU-bound chopping
+4. `link_nonsingleton_subset(all_manifest, nonsingleton_index, output_dir)`:
+   - Hardlink or copy non-singleton representative dimers into a subset directory
+   - Write the non-singleton training manifest
 
 **Tests:**
-- Parse a sample metadata TSV, verify filter logic
-- Chop a known AFDB structure at known domain boundaries, verify residue ranges
+- Parse sample metadata/source TSVs into all-representative and non-singleton indices
+- Mock TED-domain downloads and verify resumable full-atom dimer reconstruction
+- Verify chain relabeling, residue renumbering, side-chain atom preservation, and manifests
 - Assembled dimer has two chains with correct residue counts
 
 ### 2.3 — NVIDIA complexes data acquisition

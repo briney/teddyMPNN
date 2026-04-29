@@ -1,468 +1,330 @@
-"""Tests for teddymer data acquisition pipeline."""
+"""Tests for the Teddymer full-atom reconstruction pipeline."""
 
 from __future__ import annotations
 
-from pathlib import Path  # noqa: TC003 — used in fixture type annotations
-from typing import TYPE_CHECKING
-from unittest.mock import MagicMock
+from typing import TYPE_CHECKING, Any
 
 import pandas as pd
 import pytest
 
 from teddympnn.data import teddymer as teddymer_module
 from teddympnn.data.teddymer import (
-    _assemble_one,
-    _parse_chopping,
-    extract_and_assemble_dimers,
-    filter_teddymer_clusters,
+    TeddymerPrepareConfig,
+    assemble_ted_domain_pdbs,
+    build_teddymer_indices,
+    link_nonsingleton_subset,
+    prepare_teddymer_data,
+    reconstruct_teddymer_dimers,
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
-
-# ---------------------------------------------------------------------------
-# Chopping string parsing
-# ---------------------------------------------------------------------------
+    from pathlib import Path
 
 
-class TestParseChopping:
-    def test_simple_range(self):
-        assert _parse_chopping("10-50") == [(10, 50)]
-
-    def test_discontinuous(self):
-        assert _parse_chopping("10-50,80-120") == [(10, 50), (80, 120)]
-
-    def test_with_chain_prefix(self):
-        assert _parse_chopping("A:10-50") == [(10, 50)]
-
-    def test_with_chain_prefix_discontinuous(self):
-        assert _parse_chopping("A:10-50,A:80-120") == [(10, 50), (80, 120)]
-
-    def test_whitespace_handling(self):
-        assert _parse_chopping(" 10 - 50 , 80 - 120 ") == [(10, 50), (80, 120)]
+def _write_min_full_atom_pdb(path: Path, chain_id: str, start_resnum: int) -> None:
+    """Write a tiny full-atom-ish PDB with side-chain atoms."""
+    path.write_text(_min_full_atom_pdb(chain_id, start_resnum))
 
 
-# ---------------------------------------------------------------------------
-# Metadata filtering
-# ---------------------------------------------------------------------------
-
-
-class TestFilterTeddymerClusters:
-    @pytest.fixture
-    def sample_metadata(self, tmp_path: Path) -> Path:
-        """Create a sample metadata TSV with start/end domain columns."""
-        metadata_path = tmp_path / "nonsingletonrep_metadata.tsv"
-        df = pd.DataFrame(
-            {
-                "cluster_id": [1, 2, 3, 4, 5],
-                "AvgIntPlddt": [80.0, 60.0, 75.0, 90.0, 50.0],
-                "AvgIntPAE": [5.0, 15.0, 8.0, 3.0, 20.0],
-                "InterfaceLength": [15, 12, 8, 20, 5],
-                "uniprot_id": ["P00001", "P00002", "P00003", "P00004", "P00005"],
-                "domain1_start": [10, 20, 30, 40, 50],
-                "domain1_end": [80, 90, 100, 110, 120],
-                "domain2_start": [150, 160, 170, 180, 190],
-                "domain2_end": [220, 230, 240, 250, 260],
-            }
-        )
-        df.to_csv(metadata_path, sep="\t", index=False)
-        return tmp_path
-
-    def test_filters_by_plddt(self, sample_metadata: Path, tmp_path: Path):
-        output = tmp_path / "filtered.tsv"
-        df = filter_teddymer_clusters(sample_metadata, output)
-
-        # Only entries with AvgIntPlddt > 70
-        assert all(df["avgintplddt"] > 70.0)
-
-    def test_filters_by_pae(self, sample_metadata: Path, tmp_path: Path):
-        output = tmp_path / "filtered.tsv"
-        df = filter_teddymer_clusters(sample_metadata, output)
-
-        # Only entries with AvgIntPAE < 10
-        assert all(df["avgintpae"] < 10.0)
-
-    def test_filters_by_interface_length(self, sample_metadata: Path, tmp_path: Path):
-        output = tmp_path / "filtered.tsv"
-        df = filter_teddymer_clusters(sample_metadata, output)
-
-        # Only entries with InterfaceLength > 10
-        assert all(df["interfacelength"] > 10)
-
-    def test_combined_filters(self, sample_metadata: Path, tmp_path: Path):
-        output = tmp_path / "filtered.tsv"
-        df = filter_teddymer_clusters(sample_metadata, output)
-
-        # Entries 1 and 4 should pass all filters:
-        # 1: plddt=80>70, pae=5<10, ifl=15>10 ✓
-        # 2: plddt=60<70 ✗
-        # 3: plddt=75>70, pae=8<10, ifl=8<10 ✗
-        # 4: plddt=90>70, pae=3<10, ifl=20>10 ✓
-        # 5: plddt=50<70 ✗
-        assert len(df) == 2
-
-    def test_writes_output_file(self, sample_metadata: Path, tmp_path: Path):
-        output = tmp_path / "filtered.tsv"
-        filter_teddymer_clusters(sample_metadata, output)
-        assert output.exists()
-        reloaded = pd.read_csv(output, sep="\t")
-        assert len(reloaded) == 2
-
-    def test_custom_thresholds(self, sample_metadata: Path, tmp_path: Path):
-        output = tmp_path / "filtered.tsv"
-        df = filter_teddymer_clusters(
-            sample_metadata,
-            output,
-            min_interface_plddt=50.0,
-            max_interface_pae=20.0,
-            min_interface_length=5,
-        )
-        # With relaxed filters, more entries should pass
-        assert len(df) >= 2
-
-
-# ---------------------------------------------------------------------------
-# Chopping column derivation
-# ---------------------------------------------------------------------------
-
-
-class TestChoppingDerivation:
-    """Verify ``filter_teddymer_clusters`` produces the chopping columns
-    required by ``chop_and_assemble_dimers`` from each supported input schema.
-    """
-
-    def _write_metadata(self, dir_: Path, df: pd.DataFrame) -> Path:
-        path = dir_ / "nonsingletonrep_metadata.tsv"
-        df.to_csv(path, sep="\t", index=False)
-        return dir_
-
-    def test_passthrough_when_chopping_present(self, tmp_path: Path):
-        metadata = self._write_metadata(
-            tmp_path,
-            pd.DataFrame(
-                {
-                    "AvgIntPlddt": [80.0],
-                    "AvgIntPAE": [5.0],
-                    "InterfaceLength": [15],
-                    "uniprot_id": ["P00001"],
-                    "domain1_chopping": ["10-50"],
-                    "domain2_chopping": ["100-200,250-300"],
-                }
-            ),
-        )
-        df = filter_teddymer_clusters(metadata, tmp_path / "out.tsv")
-        assert df["domain1_chopping"].iloc[0] == "10-50"
-        assert df["domain2_chopping"].iloc[0] == "100-200,250-300"
-
-        # Downstream parser must be able to consume the strings.
-        from teddympnn.data.teddymer import _parse_chopping
-
-        assert _parse_chopping(df["domain1_chopping"].iloc[0]) == [(10, 50)]
-        assert _parse_chopping(df["domain2_chopping"].iloc[0]) == [
-            (100, 200),
-            (250, 300),
-        ]
-
-    def test_built_from_start_end_columns(self, tmp_path: Path):
-        metadata = self._write_metadata(
-            tmp_path,
-            pd.DataFrame(
-                {
-                    "AvgIntPlddt": [80.0],
-                    "AvgIntPAE": [5.0],
-                    "InterfaceLength": [15],
-                    "uniprot_id": ["P00001"],
-                    "domain1_start": [10],
-                    "domain1_end": [50],
-                    "domain2_start": [100],
-                    "domain2_end": [200],
-                }
-            ),
-        )
-        df = filter_teddymer_clusters(metadata, tmp_path / "out.tsv")
-        assert df["domain1_chopping"].iloc[0] == "10-50"
-        assert df["domain2_chopping"].iloc[0] == "100-200"
-
-    def test_joined_from_ted_table(self, tmp_path: Path):
-        # Side-table mapping ted_id → chopping.
-        ted_table = tmp_path / "ted_domains.tsv"
-        pd.DataFrame(
-            {
-                "ted_id": [
-                    "AF-Q9Y6K1-F1-model_v4_TED01",
-                    "AF-Q9Y6K1-F1-model_v4_TED02",
-                ],
-                "chopping": ["10-80", "120-200"],
-            }
-        ).to_csv(ted_table, sep="\t", index=False)
-
-        metadata = self._write_metadata(
-            tmp_path,
-            pd.DataFrame(
-                {
-                    "AvgIntPlddt": [80.0],
-                    "AvgIntPAE": [5.0],
-                    "InterfaceLength": [15],
-                    "ted_id1": ["AF-Q9Y6K1-F1-model_v4_TED01"],
-                    "ted_id2": ["AF-Q9Y6K1-F1-model_v4_TED02"],
-                }
-            ),
-        )
-        df = filter_teddymer_clusters(metadata, tmp_path / "out.tsv")
-        assert df["domain1_chopping"].iloc[0] == "10-80"
-        assert df["domain2_chopping"].iloc[0] == "120-200"
-        # uniprot_id derived from the TED id.
-        assert df["uniprot_id"].iloc[0] == "Q9Y6K1"
-
-    def test_ted_join_drops_unresolved_rows(self, tmp_path: Path):
-        ted_table = tmp_path / "ted_domains.tsv"
-        pd.DataFrame(
-            {
-                "ted_id": ["AF-AAA-F1-model_v4_TED01"],
-                "chopping": ["1-50"],
-            }
-        ).to_csv(ted_table, sep="\t", index=False)
-
-        metadata = self._write_metadata(
-            tmp_path,
-            pd.DataFrame(
-                {
-                    "AvgIntPlddt": [80.0, 80.0],
-                    "AvgIntPAE": [5.0, 5.0],
-                    "InterfaceLength": [15, 15],
-                    "ted_id1": [
-                        "AF-AAA-F1-model_v4_TED01",
-                        "AF-BBB-F1-model_v4_TED01",  # not in side table
-                    ],
-                    "ted_id2": [
-                        "AF-AAA-F1-model_v4_TED01",
-                        "AF-BBB-F1-model_v4_TED02",
-                    ],
-                }
-            ),
-        )
-        df = filter_teddymer_clusters(metadata, tmp_path / "out.tsv")
-        assert len(df) == 1
-        assert df["uniprot_id"].iloc[0] == "AAA"
-
-    def test_raises_when_chopping_unresolvable(self, tmp_path: Path):
-        metadata = self._write_metadata(
-            tmp_path,
-            pd.DataFrame(
-                {
-                    "AvgIntPlddt": [80.0],
-                    "AvgIntPAE": [5.0],
-                    "InterfaceLength": [15],
-                    "uniprot_id": ["P00001"],
-                }
-            ),
-        )
-        with pytest.raises(ValueError, match="Cannot derive"):
-            filter_teddymer_clusters(metadata, tmp_path / "out.tsv")
-
-    def test_require_chopping_false_warns(self, tmp_path: Path, caplog):
-        metadata = self._write_metadata(
-            tmp_path,
-            pd.DataFrame(
-                {
-                    "AvgIntPlddt": [80.0],
-                    "AvgIntPAE": [5.0],
-                    "InterfaceLength": [15],
-                    "uniprot_id": ["P00001"],
-                }
-            ),
-        )
-        df = filter_teddymer_clusters(metadata, tmp_path / "out.tsv", require_chopping=False)
-        assert "domain1_chopping" not in df.columns
-
-
-# ---------------------------------------------------------------------------
-# FoldSeek-driven dimer extraction
-# ---------------------------------------------------------------------------
-
-
-def _write_dummy_foldseek_db(prefix: Path) -> None:
-    """Create empty sibling files for a fake FoldSeek DB at ``prefix``."""
-    for suffix in ("", "_ca", "_h", "_ss", ".dbtype", ".index", ".lookup", ".source"):
-        prefix.with_name(prefix.name + suffix).write_bytes(b"")
-
-
-def _write_min_pdb(path: Path, chain_id: str, start_resnum: int, n_residues: int = 5) -> None:
-    """Write a minimal valid PDB with a single chain of glycines (CA only)."""
+def _min_full_atom_pdb(chain_id: str, start_resnum: int) -> str:
+    """Return a tiny PDB string with two residues and side-chain atoms."""
     lines: list[str] = []
-    atom_serial = 1
-    for i in range(n_residues):
-        resnum = start_resnum + i
-        # 11 cols of the PDB ATOM format, fixed-width.
-        lines.append(
-            f"ATOM  {atom_serial:>5d}  CA  GLY {chain_id}{resnum:>4d}    "
-            f"{i * 3.8:>8.3f}{0.0:>8.3f}{0.0:>8.3f}  1.00  0.00           C\n"
+    serial = 1
+    atoms = ("N", "CA", "C", "O", "CB")
+    for offset, resname in enumerate(("ALA", "LY")):
+        residue = "GLY" if resname == "LY" else resname
+        resnum = start_resnum + offset
+        for atom_idx, atom in enumerate(atoms):
+            element = atom[0]
+            lines.append(
+                f"ATOM  {serial:5d} {atom:^4s} {residue:>3s} {chain_id}{resnum:4d}    "
+                f"{float(offset):8.3f}{float(atom_idx):8.3f}{0.0:8.3f}"
+                f"  1.00 50.00           {element:>2s}\n"
+            )
+            serial += 1
+    lines.append("TER\nEND\n")
+    return "".join(lines)
+
+
+def _write_teddymer_fixture(root: Path) -> Path:
+    """Create a minimal extracted Teddymer archive fixture."""
+    extracted = root / "raw"
+    extracted.mkdir()
+
+    pd.DataFrame(
+        {
+            "DimerIndex": [1, 3],
+            "UniProtID": ["A0A005", "Q9ABC1"],
+            "DomainPair": ["TED01:TED02", "TED01:TED02"],
+            "MemberCount": [5, 2],
+            "InterfaceLength": [15, 20],
+            "AvgIntPAE": [4.5, 6.0],
+            "AvgIntPlddt": [85.0, 91.0],
+            "IntPlddt": ["80,85:90,92", "88,89:93,94"],
+        }
+    ).to_csv(extracted / "nonsingletonrep_metadata.tsv", sep="\t", index=False)
+    (extracted / "cluster.tsv").write_text("cluster\trep\n1\t1\n")
+
+    dimer_dir = extracted / "dir_ted_afdb50_cath_dimerdb"
+    dimer_dir.mkdir()
+    (dimer_dir / "ted_afdb50_cath_dimerdb.source").write_text(
+        "\n".join(
+            [
+                "1DI_A0A005_v4_TED01\t1DI_A0A005_v4_TED02",
+                "2DI_B0B000_v4_TED03\t2DI_B0B000_v4_TED04",
+                "3DI_Q9ABC1_v4_TED01\t3DI_Q9ABC1_v4_TED02",
+            ]
         )
-        atom_serial += 1
-    lines.append("TER\n")
-    lines.append("END\n")
-    path.write_text("".join(lines))
+        + "\n"
+    )
+
+    rep_dir = extracted / "dir_teddymer_repdb"
+    rep_dir.mkdir()
+    (rep_dir / "teddymer_repdb.source").write_text("rep_a\t1\nrep_b\t2\nrep_c\t3\n")
+    return extracted
 
 
-class TestExtractAndAssembleDimers:
-    def _manifest(self, tmp_path: Path, rows: Iterable[dict[str, object]]) -> Path:
-        path = tmp_path / "filtered_manifest.tsv"
-        pd.DataFrame(list(rows)).to_csv(path, sep="\t", index=False)
+class TestBuildTeddymerIndices:
+    def test_builds_all_and_nonsingleton_indices(self, tmp_path: Path) -> None:
+        extracted = _write_teddymer_fixture(tmp_path)
+
+        indices = build_teddymer_indices(extracted, tmp_path / "prepared")
+
+        all_df = pd.read_csv(indices.all_representatives_path, sep="\t")
+        non_df = pd.read_csv(indices.nonsingleton_representatives_path, sep="\t")
+
+        assert len(all_df) == 3
+        assert len(non_df) == 2
+        assert indices.metadata_path.exists()
+        assert indices.cluster_path is not None
+        assert indices.cluster_path.exists()
+
+        row = non_df[non_df["dimer_index"] == 1].iloc[0]
+        assert row["domain_a_ted_id"] == "AF-A0A005-F1-model_v4_TED01"
+        assert row["domain_b_ted_id"] == "AF-A0A005-F1-model_v4_TED02"
+        assert row["interface_residues"] == 15
+
+        all_row = all_df[all_df["dimer_index"] == 2].iloc[0]
+        assert all_row["rep_id"] == "rep_b"
+        assert all_row["domain_pair"] == "TED03:TED04"
+
+    def test_raises_on_missing_metadata_columns(self, tmp_path: Path) -> None:
+        extracted = tmp_path / "raw"
+        extracted.mkdir()
+        pd.DataFrame({"UniProtID": ["A0A005"]}).to_csv(
+            extracted / "nonsingletonrep_metadata.tsv", sep="\t", index=False
+        )
+        (extracted / "ted_afdb50_cath_dimerdb.source").write_text("")
+        (extracted / "teddymer_repdb.source").write_text("")
+
+        with pytest.raises(ValueError, match="missing required"):
+            build_teddymer_indices(extracted, tmp_path / "prepared")
+
+
+class TestPdbAssembly:
+    def test_assembles_full_atom_domains_as_chains_a_b(self) -> None:
+        assembled = assemble_ted_domain_pdbs(
+            _min_full_atom_pdb("X", 50),
+            _min_full_atom_pdb("Y", 200),
+        )
+
+        atom_lines = [line for line in assembled.splitlines() if line.startswith("ATOM")]
+        assert len(atom_lines) == 20
+        assert atom_lines[0][21] == "A"
+        assert atom_lines[0][22:26].strip() == "1"
+        assert atom_lines[9][22:26].strip() == "2"
+        assert atom_lines[10][21] == "B"
+        assert atom_lines[10][22:26].strip() == "1"
+        assert any(line[12:16].strip() == "CB" for line in atom_lines)
+        assert assembled.endswith("END\n")
+
+    def test_raises_when_domain_has_no_atoms(self) -> None:
+        with pytest.raises(ValueError, match="ATOM"):
+            assemble_ted_domain_pdbs("HEADER empty\nEND\n", _min_full_atom_pdb("Y", 1))
+
+
+class TestReconstructTeddymerDimers:
+    def _write_index(self, path: Path) -> Path:
+        pd.DataFrame(
+            {
+                "rep_id": ["rep_a", "rep_b"],
+                "dimer_index": ["1", "2"],
+                "uniprot_id": ["A0A005", "B0B000"],
+                "domain_pair": ["TED01:TED02", "TED03:TED04"],
+                "domain_a_ted_id": [
+                    "AF-A0A005-F1-model_v4_TED01",
+                    "AF-B0B000-F1-model_v4_TED03",
+                ],
+                "domain_b_ted_id": [
+                    "AF-A0A005-F1-model_v4_TED02",
+                    "AF-B0B000-F1-model_v4_TED04",
+                ],
+                "member_count": [5, None],
+                "interface_residues": [15, None],
+                "avg_int_pae": [4.5, None],
+                "avg_int_plddt": [85.0, None],
+            }
+        ).to_csv(path, sep="\t", index=False)
         return path
 
-    def test_raises_when_foldseek_missing(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-        manifest = self._manifest(
-            tmp_path,
-            [{"dimerindex": 1, "ted_id1": "X_TED01", "ted_id2": "X_TED02"}],
-        )
-        monkeypatch.setattr(teddymer_module.shutil, "which", lambda _: None)
-        with pytest.raises(RuntimeError, match="foldseek"):
-            extract_and_assemble_dimers(manifest, tmp_path / "fake_db", tmp_path / "dimers")
-
-    def test_raises_when_db_incomplete(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-        manifest = self._manifest(
-            tmp_path,
-            [{"dimerindex": 1, "ted_id1": "X_TED01", "ted_id2": "X_TED02"}],
-        )
-        # Only the main file exists; siblings are missing.
-        db = tmp_path / "incomplete_db"
-        db.write_bytes(b"")
-        monkeypatch.setattr(teddymer_module.shutil, "which", lambda _: "/fake/foldseek")
-        with pytest.raises(FileNotFoundError, match="incomplete"):
-            extract_and_assemble_dimers(manifest, db, tmp_path / "dimers")
-
-    def test_invokes_foldseek_per_chunk(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    def test_reconstructs_with_mocked_ted_downloads(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        rows = [
-            {"dimerindex": i, "ted_id1": f"E{i}_TED01", "ted_id2": f"E{i}_TED02"} for i in (1, 2, 3)
-        ]
-        manifest = self._manifest(tmp_path, rows)
-        db = tmp_path / "db" / "ted_db"
-        db.parent.mkdir()
-        _write_dummy_foldseek_db(db)
-        monkeypatch.setattr(teddymer_module.shutil, "which", lambda _: "/fake/foldseek")
+        index = self._write_index(tmp_path / "index.tsv")
+        seen: list[str] = []
 
-        run_mock = MagicMock()
-        seen_id_files: list[Path] = []
+        async def fake_fetch(_session: Any, ted_id: str, _config: TeddymerPrepareConfig) -> str:
+            seen.append(ted_id)
+            return _min_full_atom_pdb("Z", 100)
 
-        def fake_run(args: list[str], *, foldseek_binary: str = "foldseek") -> None:
-            run_mock(args)
-            if args[0] == "createsubdb":
-                # createsubdb args: [createsubdb, --id-mode, 1, --subdb-mode, 1,
-                #                    <ids>, <src>, <dst>]
-                seen_id_files.append(Path(args[5]))
-            elif args[0] == "convert2pdb":
-                # convert2pdb args: [convert2pdb, --pdb-output-mode, 1,
-                #                    <subset_db>, <pdb_dir>, ...]
-                pdb_dir = Path(args[4])
-                pdb_dir.mkdir(parents=True, exist_ok=True)
-                for entry in seen_id_files[-1].read_text().splitlines():
-                    entry = entry.strip()
-                    if entry:
-                        _write_min_pdb(pdb_dir / f"{entry}.pdb", "X", start_resnum=10)
+        monkeypatch.setattr(teddymer_module, "_fetch_domain_pdb", fake_fetch)
 
-        monkeypatch.setattr(teddymer_module, "_run_foldseek", fake_run)
-
-        success = extract_and_assemble_dimers(
-            manifest,
-            db,
+        result = reconstruct_teddymer_dimers(
+            index,
             tmp_path / "dimers",
-            chunk_size=2,
-            workers=1,
-            keep_scratch=False,
+            TeddymerPrepareConfig(output_dir=tmp_path, workers=2),
         )
 
-        assert success == 3
-        # 2 chunks → 2 createsubdb + 2 convert2pdb invocations.
-        assert run_mock.call_count == 4
-        ops = [call.args[0][0] for call in run_mock.call_args_list]
-        assert ops.count("createsubdb") == 2
-        assert ops.count("convert2pdb") == 2
+        assert result.success_count == 2
+        assert result.failure_count == 0
+        assert len(seen) == 4
+        assert (tmp_path / "dimers" / "rep_a.pdb").exists()
 
-        # Output files exist with stable dimerindex naming.
-        for i in (1, 2, 3):
-            assert (tmp_path / "dimers" / f"{i}.pdb").exists()
+        manifest = pd.read_csv(result.manifest_path, sep="\t")
+        assert set(manifest["chain_A"]) == {"A"}
+        assert set(manifest["chain_B"]) == {"B"}
+        assert set(manifest["source"]) == {"teddymer"}
+        assert set(manifest["source_id"]) == {"rep_a", "rep_b"}
 
-        # Manifest written with expected schema.
-        manifest_out = tmp_path / "dimers" / "manifest.tsv"
-        assert manifest_out.exists()
-        out_df = pd.read_csv(manifest_out, sep="\t")
-        assert set(out_df.columns) >= {
-            "structure_path",
-            "chain_A",
-            "chain_B",
-            "source",
-            "source_id",
-            "split_group",
-            "interface_residues",
-        }
-        assert (out_df["chain_A"] == "A").all()
-        assert (out_df["chain_B"] == "B").all()
-
-    def test_assemble_one_renames_and_renumbers(self, tmp_path: Path):
-        ted1 = tmp_path / "ted1.pdb"
-        ted2 = tmp_path / "ted2.pdb"
-        out = tmp_path / "dimer.pdb"
-        # Source files use chain X and start at residue 50 — the assembler
-        # must rename to A/B and renumber from 1.
-        _write_min_pdb(ted1, "X", start_resnum=50, n_residues=4)
-        _write_min_pdb(ted2, "X", start_resnum=50, n_residues=6)
-
-        assert _assemble_one(ted1, ted2, out) is True
-        assert out.exists()
-
-        from Bio.PDB import PDBParser
-
-        parser = PDBParser(QUIET=True)
-        structure = parser.get_structure("dimer", str(out))
-        chain_ids = [c.id for c in structure[0].get_chains()]
-        assert chain_ids == ["A", "B"]
-        chain_a_resnums = [r.id[1] for r in structure[0]["A"]]
-        chain_b_resnums = [r.id[1] for r in structure[0]["B"]]
-        assert chain_a_resnums == [1, 2, 3, 4]
-        assert chain_b_resnums == [1, 2, 3, 4, 5, 6]
-
-    def test_resumes_skipping_existing(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    def test_resumes_existing_complete_pdb(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        rows = [
-            {"dimerindex": 1, "ted_id1": "E1_TED01", "ted_id2": "E1_TED02"},
-            {"dimerindex": 2, "ted_id1": "E2_TED01", "ted_id2": "E2_TED02"},
-        ]
-        manifest = self._manifest(tmp_path, rows)
-        db = tmp_path / "db" / "ted_db"
-        db.parent.mkdir()
-        _write_dummy_foldseek_db(db)
-        monkeypatch.setattr(teddymer_module.shutil, "which", lambda _: "/fake/foldseek")
-
-        # Pre-create row 1's output so resume should skip it.
+        index = self._write_index(tmp_path / "index.tsv")
         out_dir = tmp_path / "dimers"
         out_dir.mkdir()
-        (out_dir / "1.pdb").write_text("ATOM\nEND\n")
+        (out_dir / "rep_a.pdb").write_text("ATOM      1  CA  GLY A   1\nEND\n")
+        seen: list[str] = []
 
-        captured_ids: list[list[str]] = []
+        async def fake_fetch(_session: Any, ted_id: str, _config: TeddymerPrepareConfig) -> str:
+            seen.append(ted_id)
+            return _min_full_atom_pdb("Z", 100)
 
-        def fake_run(args: list[str], *, foldseek_binary: str = "foldseek") -> None:
-            if args[0] == "createsubdb":
-                ids = [
-                    line.strip() for line in Path(args[5]).read_text().splitlines() if line.strip()
-                ]
-                captured_ids.append(ids)
-            elif args[0] == "convert2pdb":
-                pdb_dir = Path(args[4])
-                pdb_dir.mkdir(parents=True, exist_ok=True)
-                for entry in captured_ids[-1]:
-                    _write_min_pdb(pdb_dir / f"{entry}.pdb", "X", 10)
+        monkeypatch.setattr(teddymer_module, "_fetch_domain_pdb", fake_fetch)
 
-        monkeypatch.setattr(teddymer_module, "_run_foldseek", fake_run)
+        result = reconstruct_teddymer_dimers(
+            index,
+            out_dir,
+            TeddymerPrepareConfig(output_dir=tmp_path, workers=2),
+        )
 
-        extract_and_assemble_dimers(manifest, db, out_dir, chunk_size=10, workers=1)
+        assert result.success_count == 2
+        assert len(seen) == 2
 
-        # Exactly one createsubdb invocation, and its ids list must exclude row 1's TEDs.
-        assert len(captured_ids) == 1
-        ids = captured_ids[0]
-        assert "E1_TED01" not in ids
-        assert "E1_TED02" not in ids
-        assert "E2_TED01" in ids
-        assert "E2_TED02" in ids
+    def test_logs_download_failures(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        index = self._write_index(tmp_path / "index.tsv")
+
+        async def fake_fetch(_session: Any, ted_id: str, _config: TeddymerPrepareConfig) -> str:
+            if "B0B000" in ted_id:
+                raise RuntimeError("not found")
+            return _min_full_atom_pdb("Z", 100)
+
+        monkeypatch.setattr(teddymer_module, "_fetch_domain_pdb", fake_fetch)
+
+        failures = tmp_path / "logs" / "failures.tsv"
+        result = reconstruct_teddymer_dimers(
+            index,
+            tmp_path / "dimers",
+            TeddymerPrepareConfig(output_dir=tmp_path, workers=2),
+            failures_path=failures,
+        )
+
+        assert result.success_count == 1
+        assert result.failure_count == 1
+        failure_df = pd.read_csv(failures, sep="\t")
+        assert failure_df["rep_id"].tolist() == ["rep_b"]
+        assert "not found" in failure_df["error"].iloc[0]
+
+
+class TestNonsingletonSubset:
+    def test_links_subset_and_writes_manifest(self, tmp_path: Path) -> None:
+        all_dir = tmp_path / "all"
+        all_dir.mkdir()
+        _write_min_full_atom_pdb(all_dir / "rep_a.pdb", "A", 1)
+        _write_min_full_atom_pdb(all_dir / "rep_b.pdb", "A", 1)
+
+        all_manifest = all_dir / "manifest.tsv"
+        pd.DataFrame(
+            {
+                "structure_path": [str(all_dir / "rep_a.pdb"), str(all_dir / "rep_b.pdb")],
+                "chain_A": ["A", "A"],
+                "chain_B": ["B", "B"],
+                "source": ["teddymer", "teddymer"],
+                "source_id": ["rep_a", "rep_b"],
+                "split_group": ["rep_a", "rep_b"],
+                "interface_residues": [15, 0],
+                "rep_id": ["rep_a", "rep_b"],
+                "dimer_index": ["1", "2"],
+            }
+        ).to_csv(all_manifest, sep="\t", index=False)
+
+        nonsingleton = tmp_path / "nonsingleton.tsv"
+        pd.DataFrame(
+            {
+                "rep_id": ["rep_a"],
+                "dimer_index": ["1"],
+                "uniprot_id": ["A0A005"],
+                "domain_pair": ["TED01:TED02"],
+                "domain_a_ted_id": ["AF-A0A005-F1-model_v4_TED01"],
+                "domain_b_ted_id": ["AF-A0A005-F1-model_v4_TED02"],
+                "member_count": [5],
+                "interface_residues": [15],
+                "avg_int_pae": [4.5],
+                "avg_int_plddt": [85.0],
+            }
+        ).to_csv(nonsingleton, sep="\t", index=False)
+
+        manifest_path = link_nonsingleton_subset(
+            all_manifest,
+            nonsingleton,
+            tmp_path / "nonsingleton_dimers",
+        )
+
+        manifest = pd.read_csv(manifest_path, sep="\t")
+        assert manifest["source_id"].tolist() == ["rep_a"]
+        subset_pdb = tmp_path / "nonsingleton_dimers" / "rep_a.pdb"
+        assert subset_pdb.exists()
+
+
+class TestPrepareTeddymerData:
+    def test_prepare_end_to_end_with_mocked_downloads(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        extracted = _write_teddymer_fixture(tmp_path)
+
+        def fake_download(_config: TeddymerPrepareConfig) -> Path:
+            return extracted
+
+        async def fake_fetch(_session: Any, _ted_id: str, _config: TeddymerPrepareConfig) -> str:
+            return _min_full_atom_pdb("Z", 100)
+
+        monkeypatch.setattr(teddymer_module, "download_and_extract_teddymer", fake_download)
+        monkeypatch.setattr(teddymer_module, "_fetch_domain_pdb", fake_fetch)
+
+        result = prepare_teddymer_data(TeddymerPrepareConfig(output_dir=tmp_path / "prepared"))
+
+        assert result.all_dimers == 3
+        assert result.nonsingleton_dimers == 2
+        assert result.failures == 0
+        assert result.metadata_path.exists()
+        assert result.all_manifest_path.exists()
+        assert result.nonsingleton_manifest_path.exists()

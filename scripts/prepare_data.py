@@ -62,16 +62,12 @@ def main(
 
     # Step 1: Teddymer
     console.rule("Teddymer")
-    from teddympnn.data.teddymer import (
-        download_afdb_structures,
-        download_teddymer_metadata,
-        filter_teddymer_clusters,
-    )
+    from teddympnn.data.teddymer import TeddymerPrepareConfig, prepare_teddymer_data
 
-    metadata_dir = download_teddymer_metadata(teddymer_dir / "metadata")
-    teddymer_manifest = teddymer_dir / "filtered_manifest.tsv"
-    filter_teddymer_clusters(metadata_dir, teddymer_manifest)
-    download_afdb_structures(teddymer_manifest, teddymer_dir / "afdb", workers=workers)
+    teddymer_result = prepare_teddymer_data(
+        TeddymerPrepareConfig(output_dir=teddymer_dir, workers=workers)
+    )
+    teddymer_manifest = teddymer_result.all_manifest_path
 
     # Step 2: NVIDIA
     nvidia_manifest = None

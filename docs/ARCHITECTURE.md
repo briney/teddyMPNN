@@ -241,32 +241,28 @@ CATH domain boundaries.
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│  1. Download domain boundary table from Zenodo               │
-│     (ted_100_324m.domain_summary.cath.globularity.taxid.tsv) │
-├──────────────────────────────────────────────────────────────┤
-│  2. Download teddymer cluster/metadata from                  │
+│  1. Download teddymer.tar.gz from                            │
 │     teddymer.steineggerlab.workers.dev/foldseek/teddymer.tar │
 ├──────────────────────────────────────────────────────────────┤
-│  3. Parse cluster.tsv + nonsingletonrep_metadata.tsv         │
-│     → extract UniProt IDs and domain boundaries              │
+│  2. Extract metadata plus FoldSeek source/index files        │
 ├──────────────────────────────────────────────────────────────┤
-│  4. Download full-chain PDBs from AFDB                       │
-│     (~500K unique chains via HTTPS at ~35ms/req)             │
+│  3. Parse teddymer_repdb.source, dimerdb.source, and         │
+│     nonsingletonrep_metadata.tsv into normalized indices     │
 ├──────────────────────────────────────────────────────────────┤
-│  5. Chop domains locally using pdb-tools pdb_selres          │
-│     (instantaneous per file)                                 │
+│  4. Download full TED-domain PDBs from                       │
+│     ted.cathdb.info/api/v1/files/<TED_ID>.pdb               │
 ├──────────────────────────────────────────────────────────────┤
-│  6. Assemble dimers: relabel chains (A/B), concatenate,      │
-│     write combined PDB                                       │
+│  5. Relabel/renumber each TED-domain PDB as chain A/B        │
+│     while preserving side-chain atoms                        │
+├──────────────────────────────────────────────────────────────┤
+│  6. Write all representative dimers plus a non-singleton     │
+│     subset directory and training manifests                  │
 └──────────────────────────────────────────────────────────────┘
 ```
 
-**Estimated cost:** ~500K AFDB downloads (~125 GB), ~1M domain chops, ~500K
-dimer assemblies. With 50 concurrent workers: ~1 hour total.
-
-**Why not the TED API directly:** The TED API generates domain PDBs on-the-fly
-by downloading from AFDB and chopping — replicating that locally avoids
-hammering both servers and is faster in aggregate.
+**Output:** `metadata/nonsingletonrep_metadata.tsv`, `all_dimers/manifest.tsv`
+with full side-chain representative dimers, and
+`nonsingleton_dimers/manifest.tsv` for non-singleton cluster representatives.
 
 ### 2. NVIDIA/EMBL-EBI predicted complexes
 
