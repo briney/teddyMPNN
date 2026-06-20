@@ -1,0 +1,5 @@
+I'd like to do a bit of a reset on this repo. The overall vision is to fine-tune ProteinMPNN (paper: https://www.science.org/doi/10.1126/science.add2187, code/weights: https://github.com/RosettaCommons/foundry/blob/production/models/mpnn/README.md) using a relatively recently released dataset of protein multimers (dataset: https://teddymer.steineggerlab.workers.dev/, paper: https://arxiv.org/abs/2603.27950). The idea would be to create a fine-tuned model with a much better understanding of protein-protein interactions that would therefore be superior to ProteinMPNN at designing optimal residues at protein interfaces. I want this to be a relatively straightforward fine-tune, nothing too fancy. My feeling is that the current codebase is pretty drastically over-engineered. Again, let's make this simple, not complex. Let's start on a new branch and begin by drafting an overarching `docs/VISION.md` document that will serve as the north star for simplifying/refactoring the current codebase.
+
+---
+
+Approach A is the right choice, and so is dropping LigandMPNN. Keep it tight and focused. Proceed

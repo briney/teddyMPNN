@@ -1,0 +1,89 @@
+{
+  "cli_version": "0.7.7",
+  "checkpoint_id": "4027f9db4fd9",
+  "session_id": "2582a0ca-bf45-41f2-851e-7c4484ebdcff",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-20T06:00:06.224666915Z",
+  "branch": "refactor/simplify",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "docs/VISION.md"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-opus-4-8[1m]",
+  "turn_id": "e0144f1d222e",
+  "token_usage": {
+    "input_tokens": 8842,
+    "cache_creation_tokens": 86570,
+    "cache_read_tokens": 704296,
+    "output_tokens": 25808,
+    "api_call_count": 17
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-toolu_018MvrnxAhkwvL7ciKAFuoqo",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "superpowers:brainstorming"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "e0144f1d222e",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 19,
+        "end": 20,
+        "entry_ids": [
+          "8b9bf59a-f0a7-41b6-9bc9-cfee1aad445d"
+        ],
+        "tool_use_id": "toolu_018MvrnxAhkwvL7ciKAFuoqo"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_018MvrnxAhkwvL7ciKAFuoqo"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: superpowers:brainstorming",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 1
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-06-20T06:00:06.212320312Z",
+    "agent_lines": 130,
+    "agent_removed": 0,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 130,
+    "total_lines_changed": 130,
+    "agent_percentage": 100,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 238,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        ".claude/agents/entire-search.md": 25,
+        ".claude/settings.json": 84,
+        ".claude/settings.local.json": 11,
+        ".codex/agents/entire-search.toml": 23,
+        ".codex/config.toml": 3,
+        ".codex/hooks.json": 52,
+        ".cursor/hooks.json": 40
+      }
+    }
+  ]
+}
