@@ -1,23 +1,17 @@
 #!/usr/bin/env python
-"""Launch the two reference training runs sequentially.
+"""Launch the reference training run.
 
-Each run is a thin Hydra-style override of ``configs/train.yaml``:
-
-    Run 1: ProteinMPNN, 80/20 teddymer/pdb (the train.yaml default)
-    Run 2: LigandMPNN, 80/20
+Applies the ``configs/train.yaml`` default (ProteinMPNN, 80/20 teddymer/pdb).
 
 Usage:
-    # Run all
+    # Run
     python scripts/launch_training.py
 
-    # One run only
-    python scripts/launch_training.py --run 1
-
-    # Print commands without executing
+    # Print command without executing
     python scripts/launch_training.py --dry-run
 
     # Resume from checkpoint
-    python scripts/launch_training.py --run 1 \\
+    python scripts/launch_training.py \\
         --resume outputs/run1_proteinmpnn_full/checkpoints/step_0050000.pt
 """
 
@@ -38,26 +32,21 @@ RUNS: dict[int, tuple[str, str, list[str]]] = {
         "outputs/run1_proteinmpnn_full",
         [],
     ),
-    2: (
-        "LigandMPNN full mix (80/20)",
-        "outputs/run2_ligandmpnn_full",
-        ["model_type=ligand_mpnn"],
-    ),
 }
 
 
 @app.command()
 def main(
-    run: Annotated[int | None, typer.Option(help="Run number (1-2). Omit to run all.")] = None,
+    run: Annotated[int | None, typer.Option(help="Run number (1). Omit to run all.")] = None,
     resume: Annotated[Path | None, typer.Option(help="Checkpoint to resume from.")] = None,
     dry_run: Annotated[bool, typer.Option("--dry-run", help="Print commands only.")] = False,
 ) -> None:
     """Launch training runs."""
-    runs = [run] if run is not None else [1, 2]
+    runs = [run] if run is not None else [1]
 
     for r in runs:
         if r not in RUNS:
-            typer.echo(f"Unknown run number: {r}. Valid: 1-2")
+            typer.echo(f"Unknown run number: {r}. Valid: 1")
             raise typer.Exit(1)
 
         description, output_dir, overrides = RUNS[r]

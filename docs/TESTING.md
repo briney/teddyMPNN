@@ -37,16 +37,16 @@ release or claiming Phase-5 readiness.
 Files: `tests/validation/test_foundry_equivalence.py` (~25 tests, all
 guarded by `requires_reference_data`).
 
-Locks ProteinMPNN and LigandMPNN parameter counts and per-stage outputs
-(graph features, encoder, decoder, no-context behavior) against reference
-`.pt` tensors generated inside Foundry's published model environment.
+Locks ProteinMPNN parameter counts and per-stage outputs (graph features,
+encoder, decoder) against reference `.pt` tensors generated inside Foundry's
+published model environment.
 
 Populate:
 
 ```bash
 # Run inside the Foundry container (requires Foundry-current weights):
 python scripts/generate_foundry_reference.py
-# Output: tests/validation/reference_data/proteinmpnn_*.pt and ligandmpnn_*.pt
+# Output: tests/validation/reference_data/proteinmpnn_*.pt
 ```
 
 Once the `.pt` files exist, `pytest tests/validation/` will run them.
@@ -55,8 +55,8 @@ Once the `.pt` files exist, `pytest tests/validation/` will run them.
 
 File: `tests/training/test_e2e_training.py` (marked `@pytest.mark.slow`).
 
-Loads vanilla ProteinMPNN/LigandMPNN checkpoints and runs a few training
-steps end-to-end on `1BRS` to verify weight loading + forward/backward +
+Loads the vanilla ProteinMPNN checkpoint and runs a few training steps
+end-to-end on `1BRS` to verify weight loading + forward/backward +
 checkpointing.
 
 Populate:
@@ -64,7 +64,6 @@ Populate:
 ```bash
 # Downloads to tests/validation/reference_data/weights/:
 python -m teddympnn download pretrained --model proteinmpnn --output tests/validation/reference_data/weights
-python -m teddympnn download pretrained --model ligandmpnn --output tests/validation/reference_data/weights
 
 # A real PDB at tests/validation/reference_data/structures/1BRS.pdb is
 # also required (the tiny synthetic 1BRS_mini.pdb fixture is not

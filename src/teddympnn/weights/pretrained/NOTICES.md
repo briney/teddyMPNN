@@ -1,15 +1,14 @@
 # Bundled pretrained weights — third-party notices
 
 The `.pt` files in this directory are redistributed under the MIT License from
-the original ProteinMPNN and LigandMPNN releases by Justas Dauparas and
-collaborators (Institute for Protein Design, University of Washington).
+the original ProteinMPNN release by Justas Dauparas and collaborators
+(Institute for Protein Design, University of Washington).
 
 ## Files
 
 | File | Source repo | Variant |
 |---|---|---|
 | `proteinmpnn_v_48_020.pt` | https://github.com/dauparas/ProteinMPNN | 48 hidden dim, 0.20 Å backbone noise |
-| `ligandmpnn_v_32_010_25.pt` | https://github.com/dauparas/LigandMPNN | 32 hidden dim, 0.10 Å backbone noise, 25-atom ligand context |
 
 Original distribution: https://files.ipd.uw.edu/pub/ligandmpnn/
 
@@ -22,11 +21,6 @@ Original distribution: https://files.ipd.uw.edu/pub/ligandmpnn/
   King, N. P. & Baker, D.
   *Robust deep learning–based protein sequence design using ProteinMPNN.*
   Science 378, 49–56 (2022).
-
-- Dauparas, J., Lee, G. R., Pecoraro, R., An, L., Anishchenko, I.,
-  Glasscock, C. & Baker, D.
-  *Atomic context-conditioned protein sequence design using LigandMPNN.*
-  Nature Methods (2025).
 
 ## License
 
