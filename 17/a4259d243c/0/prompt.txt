@@ -1,0 +1,5 @@
+type check failed on github CI
+
+---
+
+update the workflow actions to the more recent (non Node 20) major version

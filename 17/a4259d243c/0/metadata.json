@@ -1,0 +1,70 @@
+{
+  "cli_version": "0.7.7",
+  "checkpoint_id": "17a4259d243c",
+  "session_id": "f8d9d6c1-bf08-48a4-8e5c-96f72eb1c35f",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-20T17:01:21.920135734Z",
+  "branch": "ci/ty-and-python-matrix",
+  "checkpoints_count": 1,
+  "save_step_count": 1,
+  "files_touched": [],
+  "agent": "Claude Code",
+  "model": "",
+  "turn_id": "060e5507580a",
+  "token_usage": {
+    "input_tokens": 10774,
+    "cache_creation_tokens": 129941,
+    "cache_read_tokens": 6502962,
+    "output_tokens": 81975,
+    "api_call_count": 77
+  },
+  "skill_events_version": 1,
+  "skill_events": [
+    {
+      "id": "claude-skill-toolu_01ULmGtbnpm4h5DDE6G3XN51",
+      "event_type": "tool_invocation",
+      "skill": {
+        "name": "superpowers:systematic-debugging"
+      },
+      "source": {
+        "agent": "claude-code",
+        "signal": "skill_tool_use",
+        "confidence": "explicit"
+      },
+      "turn_id": "060e5507580a",
+      "transcript_anchor": {
+        "unit": "line",
+        "start": 380,
+        "end": 381,
+        "entry_ids": [
+          "06651eff-d03a-42de-bc43-961dde23a652"
+        ],
+        "tool_use_id": "toolu_01ULmGtbnpm4h5DDE6G3XN51"
+      },
+      "native": {
+        "tool_name": "Skill",
+        "tool_use_id": "toolu_01ULmGtbnpm4h5DDE6G3XN51"
+      },
+      "collapse": {
+        "target": "tool_pair",
+        "label": "Skill: superpowers:systematic-debugging",
+        "default_collapsed": true
+      }
+    }
+  ],
+  "session_metrics": {
+    "turn_count": 3
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 11,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        ".claude/settings.local.json": 11
+      }
+    }
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "cli_version": "0.7.7",
+  "checkpoint_id": "17a4259d243c",
+  "strategy": "manual-commit",
+  "branch": "ci/ty-and-python-matrix",
+  "checkpoints_count": 1,
+  "files_touched": null,
+  "sessions": [
+    {
+      "metadata": "/17/a4259d243c/0/metadata.json",
+      "transcript": "/17/a4259d243c/0/full.jsonl",
+      "content_hash": "/17/a4259d243c/0/content_hash.txt",
+      "prompt": "/17/a4259d243c/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 10774,
+    "cache_creation_tokens": 129941,
+    "cache_read_tokens": 6502962,
+    "output_tokens": 81975,
+    "api_call_count": 77
+  }
+}
