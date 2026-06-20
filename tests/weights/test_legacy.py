@@ -12,7 +12,6 @@ from teddympnn.models.tokens import (
 )
 from teddympnn.weights.legacy import (
     _drop_120th_atom_type,
-    _rename_key_current_to_legacy,
     _rename_key_legacy_to_current,
     _reorder_rbf_weights,
     _reorder_token_weights,
@@ -34,35 +33,10 @@ class TestKeyRenaming:
             == "graph_featurization_module.edge_norm.weight"
         )
 
-    def test_ligand_keys(self) -> None:
-        assert _rename_key_legacy_to_current("W_v.w") == "W_protein_to_ligand_edges_embed.weight"
-        assert _rename_key_legacy_to_current("W_c.b") == "W_protein_encoding_embed.bias"
-        assert _rename_key_legacy_to_current("V_C.weight") == "W_final_context_embed.weight"
-        assert _rename_key_legacy_to_current("V_C_norm.w") == "final_context_norm.weight"
-
-    def test_context_encoder_layers(self) -> None:
-        key = "context_encoder_layers.0.W1.weight"
-        expected = "protein_ligand_context_encoder_layers.0.W1.weight"
-        assert _rename_key_legacy_to_current(key) == expected
-
     def test_unchanged_keys_pass_through(self) -> None:
         assert _rename_key_legacy_to_current("W_e.weight") == "W_e.weight"
         assert _rename_key_legacy_to_current("W_s.weight") == "W_s.weight"
         assert _rename_key_legacy_to_current("W_out.weight") == "W_out.weight"
-
-    def test_roundtrip_key_rename(self) -> None:
-        keys = [
-            "W_e.weight",
-            "W_s.weight",
-            "W_out.weight",
-            "W_out.bias",
-            "encoder_layers.0.W1.weight",
-            "decoder_layers.1.dense.W_in.weight",
-        ]
-        for key in keys:
-            legacy = _rename_key_current_to_legacy(key)
-            current = _rename_key_legacy_to_current(legacy)
-            assert current == key, f"Roundtrip failed for {key}: {legacy} → {current}"
 
 
 class TestTokenReordering:
@@ -107,17 +81,10 @@ class TestDropAtomType:
     def test_drop_reduces_dim(self) -> None:
         state = OrderedDict()
         state["graph_featurization_module.embed_atom_type_features.weight"] = torch.randn(64, 147)
-        state["graph_featurization_module.ligand_subgraph_node_embedding.weight"] = torch.randn(
-            128, 147
-        )
 
         _drop_120th_atom_type(state)
 
         assert state["graph_featurization_module.embed_atom_type_features.weight"].shape[1] == 146
-        assert (
-            state["graph_featurization_module.ligand_subgraph_node_embedding.weight"].shape[1]
-            == 146
-        )
 
     def test_drop_preserves_columns_outside_119(self) -> None:
         state = OrderedDict()

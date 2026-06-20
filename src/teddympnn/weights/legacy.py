@@ -38,39 +38,12 @@ _LEGACY_TO_CURRENT_KEY_MAP: list[tuple[str, str]] = [
     ),
     ("features.edge_embedding", "graph_featurization_module.edge_embedding"),
     ("features.norm_edges", "graph_featurization_module.edge_norm"),
-    # Protein-ligand graph featurization
-    ("features.node_project_down", "graph_featurization_module.node_embedding"),
-    ("features.norm_nodes", "graph_featurization_module.node_norm"),
-    ("features.type_linear", "graph_featurization_module.embed_atom_type_features"),
-    ("features.y_nodes", "graph_featurization_module.ligand_subgraph_node_embedding"),
-    ("features.y_edges", "graph_featurization_module.ligand_subgraph_edge_embedding"),
-    ("features.norm_y_nodes", "graph_featurization_module.ligand_subgraph_node_norm"),
-    ("features.norm_y_edges", "graph_featurization_module.ligand_subgraph_edge_norm"),
-    # Protein-ligand context encoder
-    ("W_v", "W_protein_to_ligand_edges_embed"),
-    ("W_c", "W_protein_encoding_embed"),
-    ("W_nodes_y", "W_ligand_nodes_embed"),
-    ("W_edges_y", "W_ligand_edges_embed"),
-    ("V_C_norm", "final_context_norm"),
-    ("V_C", "W_final_context_embed"),
-    ("context_encoder_layers", "protein_ligand_context_encoder_layers"),
-    ("y_context_encoder_layers", "ligand_context_encoder_layers"),
-]
-
-# Reverse map for export
-_CURRENT_TO_LEGACY_KEY_MAP: list[tuple[str, str]] = [
-    (current, legacy) for legacy, current in _LEGACY_TO_CURRENT_KEY_MAP
 ]
 
 # Legacy parameter suffixes differ from PyTorch convention
 _LEGACY_SUFFIX_MAP: dict[str, str] = {
     ".w": ".weight",
     ".b": ".bias",
-}
-
-_CURRENT_SUFFIX_MAP: dict[str, str] = {
-    ".weight": ".w",
-    ".bias": ".b",
 }
 
 
@@ -88,25 +61,6 @@ def _rename_key_legacy_to_current(key: str) -> str:
     ):
         if key.startswith(legacy_prefix):
             return current_prefix + key[len(legacy_prefix) :]
-
-    return key
-
-
-def _rename_key_current_to_legacy(key: str) -> str:
-    """Rename a single current key to legacy naming."""
-    # Apply prefix mapping (first match, reversed order for longest-match priority)
-    for current_prefix, legacy_prefix in sorted(
-        _CURRENT_TO_LEGACY_KEY_MAP, key=lambda x: -len(x[0])
-    ):
-        if key.startswith(current_prefix):
-            key = legacy_prefix + key[len(current_prefix) :]
-            break
-
-    # Apply suffix mapping
-    for current_suffix, legacy_suffix in _CURRENT_SUFFIX_MAP.items():
-        if key.endswith(current_suffix):
-            key = key[: -len(current_suffix)] + legacy_suffix
-            break
 
     return key
 
@@ -169,26 +123,13 @@ def _drop_120th_atom_type(
 
     Affects embedding weights that have atom type as input dim.
     """
-    keys_to_check = [
-        "graph_featurization_module.embed_atom_type_features.weight",
-        "graph_featurization_module.embed_atom_type_features.bias",
-        "graph_featurization_module.ligand_subgraph_node_embedding.weight",
-    ]
-    for key in keys_to_check:
-        if key not in state_dict:
-            continue
+    key = "graph_featurization_module.embed_atom_type_features.weight"
+    if key in state_dict:
         tensor = state_dict[key]
-        # The atom type one-hot occupies the first 120 positions in the input dim
-        # We need to drop index 119 (the 120th type, 0-indexed)
-        if key.endswith(".bias"):
-            continue  # Bias is output-dim, not affected
-        if "embed_atom_type_features" in key and key.endswith(".weight"):
-            # Linear weight: (out_features, in_features)
-            # Input is [120 element + 19 group + 8 period] = 147
-            # → [119 element + 19 group + 8 period] = 146
-            if tensor.shape[1] == 147:
-                state_dict[key] = torch.cat([tensor[:, :119], tensor[:, 120:]], dim=1)
-        elif "ligand_subgraph_node_embedding" in key and tensor.shape[1] == 147:
+        # Linear weight: (out_features, in_features)
+        # Input is [120 element + 19 group + 8 period] = 147
+        # → [119 element + 19 group + 8 period] = 146
+        if tensor.shape[1] == 147:
             state_dict[key] = torch.cat([tensor[:, :119], tensor[:, 120:]], dim=1)
 
 

@@ -12,8 +12,6 @@ from teddympnn.models.tokens import (
     NUM_RBF_PAIRS,
     TOKEN_ORDER,
     VOCAB_SIZE,
-    current_to_legacy_rbf_permutation,
-    current_to_legacy_token_permutation,
     expand_pair_permutation,
     legacy_to_current_rbf_permutation,
     legacy_to_current_token_permutation,
@@ -60,39 +58,11 @@ class TestTokenPermutations:
         for i, tok in enumerate(TOKEN_ORDER):
             assert LEGACY_TOKEN_ORDER[perm[i]] == tok
 
-    def test_current_to_legacy_maps_correctly(self) -> None:
-        perm = current_to_legacy_token_permutation()
-        assert len(perm) == VOCAB_SIZE
-        for i, tok in enumerate(LEGACY_TOKEN_ORDER):
-            assert TOKEN_ORDER[perm[i]] == tok
-
-    def test_token_permutation_roundtrip(self) -> None:
-        """legacy → current → legacy is identity."""
-        l2c = legacy_to_current_token_permutation()
-        c2l = current_to_legacy_token_permutation()
-        # Compose: for each legacy index i, l2c gives current index
-        # then c2l[l2c[i]] should give back i... but these permutations
-        # are gather-style, so: current[j] = legacy[l2c[j]]
-        # legacy[k] = current[c2l[k]]
-        # legacy[k] = legacy[l2c[c2l[k]]] → l2c[c2l[k]] = k
-        for k in range(VOCAB_SIZE):
-            assert l2c[c2l[k]] == k
-
 
 class TestRBFPermutations:
     def test_legacy_to_current_has_correct_length(self) -> None:
         perm = legacy_to_current_rbf_permutation()
         assert len(perm) == NUM_RBF_PAIRS
-
-    def test_current_to_legacy_has_correct_length(self) -> None:
-        perm = current_to_legacy_rbf_permutation()
-        assert len(perm) == NUM_RBF_PAIRS
-
-    def test_rbf_permutation_roundtrip(self) -> None:
-        l2c = legacy_to_current_rbf_permutation()
-        c2l = current_to_legacy_rbf_permutation()
-        for k in range(NUM_RBF_PAIRS):
-            assert l2c[c2l[k]] == k
 
     def test_expand_pair_permutation(self) -> None:
         perm = [1, 0]  # Swap first two pairs

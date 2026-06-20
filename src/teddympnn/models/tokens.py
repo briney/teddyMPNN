@@ -168,15 +168,6 @@ def legacy_to_current_token_permutation() -> list[int]:
     return [legacy_idx[tok] for tok in TOKEN_ORDER]
 
 
-def current_to_legacy_token_permutation() -> list[int]:
-    """Return index mapping P such that ``legacy[i] = current[P[i]]``.
-
-    Apply as: ``legacy_weight = current_weight[P]`` along the token dimension.
-    """
-    current_idx = {tok: i for i, tok in enumerate(TOKEN_ORDER)}
-    return [current_idx[tok] for tok in LEGACY_TOKEN_ORDER]
-
-
 def _enumerate_pairs_current() -> list[tuple[str, str]]:
     """Current (Foundry) outer-product ordering: N, CA, C, O, CB."""
     atoms = BACKBONE_ATOMS
@@ -226,13 +217,6 @@ def legacy_to_current_rbf_permutation() -> list[int]:
     legacy_pair_idx = {pair: i for i, pair in enumerate(_LEGACY_PAIR_ORDER)}
     current_pairs = _enumerate_pairs_current()
     return [legacy_pair_idx[pair] for pair in current_pairs]
-
-
-def current_to_legacy_rbf_permutation() -> list[int]:
-    """Return index mapping P such that ``legacy_rbf[i] = current_rbf[P[i]]``."""
-    current_pairs = _enumerate_pairs_current()
-    current_pair_idx = {pair: i for i, pair in enumerate(current_pairs)}
-    return [current_pair_idx[pair] for pair in _LEGACY_PAIR_ORDER]
 
 
 def expand_pair_permutation(pair_perm: list[int], num_rbf: int = 16) -> list[int]:
