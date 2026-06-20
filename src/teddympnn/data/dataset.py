@@ -94,12 +94,14 @@ class PPIDataset(Dataset[dict[str, Any]]):
         skipped_interface = 0
         skipped_partner_masks = 0
         for idx, row in self.manifest.iterrows():
+            # pandas iterrows() yields a Hashable index label; coerce to int once.
+            row_index = int(idx)  # ty: ignore[invalid-argument-type]
             structure_path = Path(row["structure_path"])
             if not structure_path.exists():
                 logger.debug("Skipping missing structure: %s", structure_path)
                 continue
 
-            metadata = self._get_structure_metadata(int(idx), structure_path, row)
+            metadata = self._get_structure_metadata(row_index, structure_path, row)
             n_res = metadata["num_residues"]
             if n_res > self.max_residues:
                 skipped_length += 1
@@ -118,11 +120,11 @@ class PPIDataset(Dataset[dict[str, Any]]):
                 continue
 
             # View 1: design A, condition on B
-            self._views.append((int(idx), chain_a, chain_b))
+            self._views.append((row_index, chain_a, chain_b))
             self._num_residues.append(n_res)
 
             # View 2: design B, condition on A
-            self._views.append((int(idx), chain_b, chain_a))
+            self._views.append((row_index, chain_b, chain_a))
             self._num_residues.append(n_res)
 
         if skipped_length > 0:
@@ -223,8 +225,8 @@ class PPIDataset(Dataset[dict[str, Any]]):
     def __len__(self) -> int:
         return len(self._views)
 
-    def __getitem__(self, idx: int) -> dict[str, Any]:
-        manifest_idx, design_chains, fixed_chains = self._views[idx]
+    def __getitem__(self, index: int) -> dict[str, Any]:
+        manifest_idx, design_chains, fixed_chains = self._views[index]
         features = self._load_features(manifest_idx)
         source = str(self.manifest.iloc[manifest_idx].get("source", "unknown"))
 
@@ -403,4 +405,4 @@ class MixedDataLoader:
         for loader in self._loaders:
             sampler = loader.batch_sampler
             if sampler is not None and hasattr(sampler, "set_epoch"):
-                sampler.set_epoch(self._epoch)
+                sampler.set_epoch(self._epoch)  # ty: ignore[call-non-callable]

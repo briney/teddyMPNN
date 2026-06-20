@@ -106,7 +106,7 @@ class ProteinMPNN(nn.Module):
         input_features: dict[str, torch.Tensor],
     ) -> dict[str, torch.Tensor]:
         """Compute graph features from input batch."""
-        return self.graph_featurization_module(  # type: ignore[no-any-return]
+        return self.graph_featurization_module(
             X=input_features["X"],
             residue_mask=input_features["residue_mask"],
             R_idx=input_features["R_idx"],

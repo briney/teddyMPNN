@@ -167,8 +167,8 @@ def train(
 
 @evaluate_app.command()
 def recovery(
-    checkpoint: Annotated[Path, typer.Option(help="Model checkpoint path.")] = ...,  # type: ignore[assignment]
-    data: Annotated[Path, typer.Option(help="Test data manifest path.")] = ...,  # type: ignore[assignment]
+    checkpoint: Annotated[Path, typer.Option(help="Model checkpoint path.")],
+    data: Annotated[Path, typer.Option(help="Test data manifest path.")],
     interface_cutoff: Annotated[
         float, typer.Option(help="CB-CB distance cutoff for interface residues (A).")
     ] = 8.0,
@@ -215,8 +215,8 @@ def recovery(
 
 @evaluate_app.command()
 def ddg(
-    checkpoint: Annotated[Path, typer.Option(help="Model checkpoint path.")] = ...,  # type: ignore[assignment]
-    skempi: Annotated[Path, typer.Option(help="SKEMPI data directory.")] = ...,  # type: ignore[assignment]
+    checkpoint: Annotated[Path, typer.Option(help="Model checkpoint path.")],
+    skempi: Annotated[Path, typer.Option(help="SKEMPI data directory.")],
     num_samples: Annotated[int, typer.Option(help="Monte Carlo samples.")] = 20,
     noise: Annotated[float, typer.Option(help="Backbone noise for scoring (A).")] = 0.0,
     max_entries: Annotated[int | None, typer.Option(help="Limit entries (for testing).")] = None,
@@ -261,9 +261,9 @@ def ddg(
 
 @app.command()
 def score(
-    checkpoint: Annotated[Path, typer.Option(help="Model checkpoint path.")] = ...,  # type: ignore[assignment]
-    pdb: Annotated[Path, typer.Option(help="PDB/mmCIF structure file.")] = ...,  # type: ignore[assignment]
-    chains: Annotated[str, typer.Option(help="Design chain IDs (comma-separated).")] = ...,  # type: ignore[assignment]
+    checkpoint: Annotated[Path, typer.Option(help="Model checkpoint path.")],
+    pdb: Annotated[Path, typer.Option(help="PDB/mmCIF structure file.")],
+    chains: Annotated[str, typer.Option(help="Design chain IDs (comma-separated).")],
     num_samples: Annotated[int, typer.Option(help="Monte Carlo samples.")] = 1,
 ) -> None:
     """Score a structure with a trained model."""

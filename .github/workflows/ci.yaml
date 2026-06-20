@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.11"]
+        python-version: ["3.11", "3.12", "3.13"]
 
     steps:
       - uses: actions/checkout@v4
@@ -33,7 +33,7 @@ jobs:
         run: ruff format --check src/ tests/
 
       - name: Type check
-        run: mypy src/
+        run: ty check src/
 
       - name: Test
         run: pytest
