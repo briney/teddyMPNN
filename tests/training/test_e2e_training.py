@@ -27,13 +27,12 @@ _STRUCTURES_DIR = _REF_DIR / "structures"
 _WEIGHTS_DIR = _REF_DIR / "weights"
 
 _PROTEINMPNN_WEIGHTS = _WEIGHTS_DIR / "proteinmpnn_v_48_020.pt"
-_LIGANDMPNN_WEIGHTS = _WEIGHTS_DIR / "ligandmpnn_v_32_010_25.pt"
 
 # Test structures (PDB complexes with two chains)
 _TEST_STRUCTURES = ["1BRS"]
 
 _has_gpu = torch.cuda.is_available()
-_has_weights = _PROTEINMPNN_WEIGHTS.exists() and _LIGANDMPNN_WEIGHTS.exists()
+_has_weights = _PROTEINMPNN_WEIGHTS.exists()
 _has_structures = all((_STRUCTURES_DIR / f"{pdb}.pdb").exists() for pdb in _TEST_STRUCTURES)
 
 

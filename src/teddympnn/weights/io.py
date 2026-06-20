@@ -22,21 +22,13 @@ logger = logging.getLogger(__name__)
 
 FORMAT_VERSION = "teddympnn.v1"
 
-# Pretrained checkpoint URLs from IPD
-_IPD_BASE_URL = "https://files.ipd.uw.edu/pub/ligandmpnn"
-
+# Pretrained checkpoint URLs from IPD (https://files.ipd.uw.edu/pub/)
 PRETRAINED_URLS: dict[str, dict[str, str]] = {
     "protein_mpnn": {
-        "002": f"{_IPD_BASE_URL}/proteinmpnn_v_48_002.pt",
-        "010": f"{_IPD_BASE_URL}/proteinmpnn_v_48_010.pt",
-        "020": f"{_IPD_BASE_URL}/proteinmpnn_v_48_020.pt",
-        "030": f"{_IPD_BASE_URL}/proteinmpnn_v_48_030.pt",
-    },
-    "ligand_mpnn": {
-        "005": f"{_IPD_BASE_URL}/ligandmpnn_v_32_005_25.pt",
-        "010": f"{_IPD_BASE_URL}/ligandmpnn_v_32_010_25.pt",
-        "020": f"{_IPD_BASE_URL}/ligandmpnn_v_32_020_25.pt",
-        "030": f"{_IPD_BASE_URL}/ligandmpnn_v_32_030_25.pt",
+        "002": "https://files.ipd.uw.edu/pub/proteinmpnn/proteinmpnn_v_48_002.pt",
+        "010": "https://files.ipd.uw.edu/pub/proteinmpnn/proteinmpnn_v_48_010.pt",
+        "020": "https://files.ipd.uw.edu/pub/proteinmpnn/proteinmpnn_v_48_020.pt",
+        "030": "https://files.ipd.uw.edu/pub/proteinmpnn/proteinmpnn_v_48_030.pt",
     },
 }
 
@@ -62,7 +54,7 @@ def save_checkpoint_bundle(
         step: Current training step.
         config: Training configuration dict.
         metrics: Current metrics dict.
-        model_family: ``"protein_mpnn"`` or ``"ligand_mpnn"``.
+        model_family: ``"protein_mpnn"``.
         compatibility: Format compatibility metadata.
     """
     if compatibility is None:
@@ -191,7 +183,7 @@ def download_pretrained(
     """Download pretrained weights from IPD servers.
 
     Args:
-        model_type: ``"protein_mpnn"`` or ``"ligand_mpnn"``.
+        model_type: ``"protein_mpnn"``.
         noise_level: Noise level string (e.g., ``"020"``).
         output_dir: Directory to save the downloaded file.
 

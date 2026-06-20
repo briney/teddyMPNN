@@ -4,7 +4,7 @@
 distance features + positional encodings for all backbone atom pairs.
 
 ``ProteinFeaturesLigand`` extends this with a protein-to-ligand context graph
-and an intraligand subgraph for LigandMPNN.
+and an intraligand subgraph.
 """
 
 from __future__ import annotations
@@ -33,15 +33,15 @@ NUM_RBF: int = 16
 RBF_D_MIN: float = 2.0
 RBF_D_MAX: float = 22.0
 
-# Element type vocabulary for LigandMPNN (119 types in Foundry current format)
+# Element type vocabulary (119 types in Foundry current format)
 NUM_ELEMENT_TYPES: int = 119
 NUM_PERIODIC_GROUPS: int = 19
 NUM_PERIODIC_PERIODS: int = 8
 ATOM_TYPE_EMBED_DIM: int = NUM_ELEMENT_TYPES + NUM_PERIODIC_GROUPS + NUM_PERIODIC_PERIODS  # 146
 ATOM_TYPE_OUTPUT_DIM: int = 64
 
-# Number of context (non-protein) atoms per residue in LigandMPNN
-NUM_CONTEXT_ATOMS: int = 25
+# Default max context (non-protein) atoms per residue for ProteinFeaturesLigand
+_DEFAULT_CONTEXT_K: int = 25
 
 # Angle features: sin/cos of two angles = 4
 NUM_ANGLE_FEATURES: int = 4
@@ -541,7 +541,7 @@ class ProteinFeatures(nn.Module):
 
 
 class ProteinFeaturesLigand(ProteinFeatures):
-    """Graph featurization for protein-ligand structures (LigandMPNN).
+    """Graph featurization for protein-ligand structures.
 
     Extends ``ProteinFeatures`` with three additional feature sets:
 
@@ -553,10 +553,11 @@ class ProteinFeaturesLigand(ProteinFeatures):
     Args:
         num_positional_embeddings: Positional encoding output dim.
         num_rbf: Number of RBF kernels.
-        top_k: Protein backbone k-NN count (default 32 for LigandMPNN).
+        top_k: Protein backbone k-NN count.
         hidden_dim: Feature output dimensionality.
         max_relative_feature: Max relative position offset.
         dropout: Dropout probability.
+        context_k: Max number of context (non-protein) atoms per residue.
     """
 
     def __init__(
@@ -567,7 +568,7 @@ class ProteinFeaturesLigand(ProteinFeatures):
         hidden_dim: int = 128,
         max_relative_feature: int = 32,
         dropout: float = 0.1,
-        num_context_atoms: int = NUM_CONTEXT_ATOMS,
+        context_k: int = _DEFAULT_CONTEXT_K,
     ) -> None:
         super().__init__(
             num_positional_embeddings=num_positional_embeddings,
@@ -577,7 +578,7 @@ class ProteinFeaturesLigand(ProteinFeatures):
             max_relative_feature=max_relative_feature,
             dropout=dropout,
         )
-        self.num_context_atoms = num_context_atoms
+        self.context_k = context_k
 
         # Atom type embedding: 146-dim input → 64-dim output
         self.embed_atom_type_features = nn.Linear(
@@ -599,7 +600,6 @@ class ProteinFeaturesLigand(ProteinFeatures):
         self.ligand_subgraph_edge_norm = nn.LayerNorm(hidden_dim)
 
         # Registered buffers (not learned, copied from model not checkpoint)
-        # These are populated by the parent LigandMPNN module
         self.register_buffer(
             "side_chain_atom_types",
             default_side_chain_atom_types(),
@@ -761,7 +761,7 @@ class ProteinFeaturesLigand(ProteinFeatures):
         # Mask invalid atoms with large distance
         cb_to_y = cb_to_y + (~Y_m.bool()).unsqueeze(1).float() * 1e6
 
-        Kc = min(self.num_context_atoms, N_atoms)
+        Kc = min(self.context_k, N_atoms)
         # Select top-Kc nearest: (B, L, Kc)
         _, Y_idx = cb_to_y.topk(Kc, dim=-1, largest=False)
 

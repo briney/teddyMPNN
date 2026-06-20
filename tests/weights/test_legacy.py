@@ -129,7 +129,7 @@ class TestConvertToLegacy:
 
 
 class TestAtomType120thRoundtrip:
-    """Restore↔drop must round-trip the LigandMPNN 120th atom-type slot."""
+    """Restore↔drop must round-trip the legacy 120th atom-type slot."""
 
     def test_restore_inserts_zero_column(self) -> None:
         state = OrderedDict()

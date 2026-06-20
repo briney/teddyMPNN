@@ -26,8 +26,7 @@ class TokenBudgetBatchSampler(Sampler[list[int]]):
     Args:
         lengths: Per-example residue counts, indexed by dataset position.
         token_budget: Maximum padded residues per batch (``B * L_max``).
-            For LigandMPNN training the recommended value is ~6,000;
-            ProteinMPNN tolerates ~10,000.
+            For ProteinMPNN training the recommended value is ~10,000.
         shuffle: Randomize example order each epoch.
         drop_last: Drop the final incomplete batch.
         seed: Random seed for reproducibility.

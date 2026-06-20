@@ -115,9 +115,7 @@ def prepare_manifests_cmd(
 
 @download_app.command()
 def pretrained(
-    model: Annotated[
-        str, typer.Option(help="Model type: protein_mpnn or ligand_mpnn.")
-    ] = "ligand_mpnn",
+    model: Annotated[str, typer.Option(help="Model type (protein_mpnn).")] = "protein_mpnn",
     noise: Annotated[str, typer.Option(help="Noise level (e.g. 020, 010).")] = "020",
     output: Annotated[Path, typer.Option(help="Output directory.")] = Path("weights"),
 ) -> None:
@@ -174,18 +172,14 @@ def train(
 def export_foundry(
     checkpoint: Annotated[Path, typer.Option(help="teddyMPNN checkpoint path.")] = ...,  # type: ignore[assignment]
     output: Annotated[Path, typer.Option(help="Output Foundry checkpoint path.")] = ...,  # type: ignore[assignment]
-    model_type: Annotated[
-        str, typer.Option(help="Model type: protein_mpnn or ligand_mpnn.")
-    ] = "protein_mpnn",
 ) -> None:
     """Export a teddyMPNN checkpoint to Foundry format."""
 
-    from teddympnn.models import LigandMPNN, ProteinMPNN
+    from teddympnn.models import ProteinMPNN
     from teddympnn.weights.foundry import export_foundry_checkpoint
     from teddympnn.weights.io import load_checkpoint_bundle
 
-    model_cls = LigandMPNN if model_type == "ligand_mpnn" else ProteinMPNN
-    model = model_cls()
+    model = ProteinMPNN()
 
     bundle = load_checkpoint_bundle(checkpoint, model, map_location="cpu")
     export_foundry_checkpoint(output, model, config=bundle.get("config"))
@@ -201,9 +195,6 @@ def export_foundry(
 def recovery(
     checkpoint: Annotated[Path, typer.Option(help="Model checkpoint path.")] = ...,  # type: ignore[assignment]
     data: Annotated[Path, typer.Option(help="Test data manifest path.")] = ...,  # type: ignore[assignment]
-    model_type: Annotated[
-        str, typer.Option(help="Model type: protein_mpnn or ligand_mpnn.")
-    ] = "protein_mpnn",
     interface_cutoff: Annotated[
         float, typer.Option(help="CB-CB distance cutoff for interface residues (A).")
     ] = 8.0,
@@ -215,17 +206,16 @@ def recovery(
     from teddympnn.data.dataset import PPIDataset
     from teddympnn.data.sampler import TokenBudgetBatchSampler
     from teddympnn.evaluation.sequence_recovery import compute_recovery
-    from teddympnn.models import LigandMPNN, ProteinMPNN
+    from teddympnn.models import ProteinMPNN
     from teddympnn.weights.io import load_model_weights
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    model_cls = LigandMPNN if model_type == "ligand_mpnn" else ProteinMPNN
-    model = model_cls()
+    model = ProteinMPNN()
     load_model_weights(checkpoint, model, map_location=device)
     model = model.to(device)
 
-    dataset = PPIDataset(data, include_ligand_atoms=(model_type == "ligand_mpnn"))
+    dataset = PPIDataset(data)
     collator = PaddingCollator()
     sampler = TokenBudgetBatchSampler(dataset.lengths, token_budget=10_000, shuffle=False)
     loader = torch.utils.data.DataLoader(dataset, batch_sampler=sampler, collate_fn=collator)
@@ -254,9 +244,6 @@ def ddg(
     checkpoint: Annotated[Path, typer.Option(help="Model checkpoint path.")] = ...,  # type: ignore[assignment]
     skempi: Annotated[Path, typer.Option(help="SKEMPI data directory.")] = ...,  # type: ignore[assignment]
     num_samples: Annotated[int, typer.Option(help="Monte Carlo samples.")] = 20,
-    model_type: Annotated[
-        str, typer.Option(help="Model type: protein_mpnn or ligand_mpnn.")
-    ] = "protein_mpnn",
     noise: Annotated[float, typer.Option(help="Backbone noise for scoring (A).")] = 0.0,
     max_entries: Annotated[int | None, typer.Option(help="Limit entries (for testing).")] = None,
 ) -> None:
@@ -264,13 +251,12 @@ def ddg(
     import torch
 
     from teddympnn.evaluation.skempi import evaluate_skempi
-    from teddympnn.models import LigandMPNN, ProteinMPNN
+    from teddympnn.models import ProteinMPNN
     from teddympnn.weights.io import load_model_weights
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    model_cls = LigandMPNN if model_type == "ligand_mpnn" else ProteinMPNN
-    model = model_cls()
+    model = ProteinMPNN()
     load_model_weights(checkpoint, model, map_location=device)
     model = model.to(device)
 
@@ -305,26 +291,20 @@ def score(
     pdb: Annotated[Path, typer.Option(help="PDB/mmCIF structure file.")] = ...,  # type: ignore[assignment]
     chains: Annotated[str, typer.Option(help="Design chain IDs (comma-separated).")] = ...,  # type: ignore[assignment]
     num_samples: Annotated[int, typer.Option(help="Monte Carlo samples.")] = 1,
-    model_type: Annotated[
-        str, typer.Option(help="Model type: protein_mpnn or ligand_mpnn.")
-    ] = "protein_mpnn",
 ) -> None:
     """Score a structure with a trained model."""
     import torch
 
     from teddympnn.data.features import (
         derive_backbone,
-        extract_ligand_atoms,
-        extract_sidechain_atoms,
         parse_structure,
     )
-    from teddympnn.models import LigandMPNN, ProteinMPNN
+    from teddympnn.models import ProteinMPNN
     from teddympnn.weights.io import load_model_weights
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    model_cls = LigandMPNN if model_type == "ligand_mpnn" else ProteinMPNN
-    model = model_cls()
+    model = ProteinMPNN()
     load_model_weights(checkpoint, model, map_location=device)
     model = model.to(device)
 
@@ -351,24 +331,6 @@ def score(
         "designed_residue_mask": designed.unsqueeze(0).to(device),
         "fixed_residue_mask": (~designed).unsqueeze(0).to(device),
     }
-    if model_type == "ligand_mpnn":
-        ligand = extract_ligand_atoms(pdb)
-        sidechains = extract_sidechain_atoms(
-            features["xyz_37"],
-            features["xyz_37_m"],
-            features["S"],
-            ~designed,
-        )
-        Y = ligand["Y"]
-        Y_m = ligand["Y_m"]
-        Y_t = ligand["Y_t"]
-        if sidechains["Y"].shape[0] > 0:
-            Y = torch.cat([Y, sidechains["Y"]], dim=0)
-            Y_m = torch.cat([Y_m, sidechains["Y_m"]], dim=0)
-            Y_t = torch.cat([Y_t, sidechains["Y_t"]], dim=0)
-        batch["Y"] = Y.unsqueeze(0).to(device)
-        batch["Y_m"] = Y_m.unsqueeze(0).to(device)
-        batch["Y_t"] = Y_t.unsqueeze(0).to(device)
 
     scores = []
     for _ in range(num_samples):

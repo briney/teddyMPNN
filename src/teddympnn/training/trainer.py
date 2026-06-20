@@ -20,7 +20,7 @@ from torch.nn.parallel import DistributedDataParallel
 from torch.nn.utils import clip_grad_norm_
 
 from teddympnn.data.features import identify_interface_residues
-from teddympnn.models import LigandMPNN, ProteinMPNN
+from teddympnn.models import ProteinMPNN
 from teddympnn.training.loss import LabelSmoothedNLLLoss
 from teddympnn.training.scheduler import NoamScheduler
 from teddympnn.weights.io import load_checkpoint_bundle, load_model_weights, save_checkpoint_bundle
@@ -43,7 +43,7 @@ def _seed_everything(seed: int) -> None:
 
 
 class Trainer:
-    """Training loop for ProteinMPNN/LigandMPNN fine-tuning.
+    """Training loop for ProteinMPNN fine-tuning.
 
     Handles single-GPU and DDP training, mixed precision, gradient
     clipping, checkpointing, and validation.
@@ -59,7 +59,7 @@ class Trainer:
     def __init__(
         self,
         config: TrainingConfig,
-        model: ProteinMPNN | LigandMPNN,
+        model: ProteinMPNN,
         train_loader: DataLoader[dict[str, Any]] | Any,
         val_loader: DataLoader[dict[str, Any]] | Any | None = None,
         device: torch.device | None = None,
@@ -162,8 +162,7 @@ class Trainer:
         assert config.pretrained_weights is not None
 
         # Build model
-        is_ligand = config.model_type == "ligand_mpnn"
-        model_cls = LigandMPNN if is_ligand else ProteinMPNN
+        model_cls = ProteinMPNN
         model_kwargs: dict[str, Any] = {
             "hidden_dim": config.model.hidden_dim,
             "num_encoder_layers": config.model.num_encoder_layers,
@@ -171,8 +170,6 @@ class Trainer:
             "num_neighbors": config.model.num_neighbors,
             "dropout": config.model.dropout,
         }
-        if is_ligand:
-            model_kwargs["num_context_atoms"] = config.model.num_context_atoms
         model = model_cls(**model_kwargs)
 
         # Load pretrained weights
@@ -188,12 +185,6 @@ class Trainer:
                 manifest_path=ds_cfg.path,
                 max_residues=config.max_residues,
                 min_interface_contacts=config.min_interface_contacts,
-                include_ligand_atoms=is_ligand,
-                atomize_partner_sidechains=is_ligand and config.atomize_partner_sidechains,
-                sidechain_atomization_probability=config.sidechain_atomization_probability,
-                sidechain_atomization_per_residue_probability=(
-                    config.sidechain_atomization_per_residue_probability
-                ),
             )
             datasets.append(ds)
             ratios.append(ds_cfg.ratio)
@@ -218,10 +209,6 @@ class Trainer:
                     manifest_path=ds_cfg.path,
                     max_residues=config.max_residues,
                     min_interface_contacts=config.min_interface_contacts,
-                    include_ligand_atoms=is_ligand,
-                    atomize_partner_sidechains=is_ligand and config.atomize_partner_sidechains,
-                    sidechain_atomization_probability=1.0,
-                    sidechain_atomization_per_residue_probability=1.0,
                 )
                 val_datasets.append(ds)
                 val_ratios.append(ds_cfg.ratio)

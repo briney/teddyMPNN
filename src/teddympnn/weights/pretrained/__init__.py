@@ -12,7 +12,6 @@ from typing import Final
 
 PACKAGED_WEIGHTS: Final[dict[str, str]] = {
     "protein_mpnn": "proteinmpnn_v_48_020.pt",
-    "ligand_mpnn": "ligandmpnn_v_32_010_25.pt",
 }
 
 
@@ -20,7 +19,7 @@ def default_pretrained_weights(model_type: str) -> Path:
     """Return the packaged default weights path for ``model_type``.
 
     Args:
-        model_type: ``"protein_mpnn"`` or ``"ligand_mpnn"``.
+        model_type: ``"protein_mpnn"``.
 
     Returns:
         Filesystem path to the packaged ``.pt`` file. The file is not guaranteed

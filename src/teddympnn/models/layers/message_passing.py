@@ -205,8 +205,8 @@ class DecLayer(nn.Module):
 
     ``num_in`` by context:
     - ProteinMPNN decoder: ``4H`` → caller passes 3H, layer adds source H
-    - LigandMPNN protein-ligand context: ``3H`` → caller passes 2H
-    - LigandMPNN ligand subgraph: ``2H`` → caller passes H
+    - Protein-ligand context encoder: ``3H`` → caller passes 2H
+    - Ligand subgraph encoder: ``2H`` → caller passes H
 
     Args:
         num_hidden: Hidden dimensionality (H).

@@ -79,7 +79,7 @@ def compute_recovery(
     interface-only recovery using CB-CB distance to the partner chain.
 
     Args:
-        model: ProteinMPNN or LigandMPNN model.
+        model: ProteinMPNN model.
         data_loader: DataLoader yielding batched feature dicts.
         interface_cutoff: CB-CB distance cutoff for interface residues (A).
         device: Device for computation. Defaults to model device.

@@ -23,7 +23,6 @@ from teddympnn.evaluation._batch import (
     extract_chain_view,
     load_eval_features,
 )
-from teddympnn.models.ligand_mpnn import LigandMPNN
 
 if TYPE_CHECKING:
     from teddympnn.models.protein_mpnn import ProteinMPNN
@@ -46,7 +45,7 @@ _MUT_BODY_RE = re.compile(r"^(-?\d+)([A-Za-z]?)$")
 
 
 def _model_type(model: torch.nn.Module) -> str:
-    return "ligand_mpnn" if isinstance(model, LigandMPNN) else "protein_mpnn"
+    return "protein_mpnn"
 
 
 def _parse_mutation_body(body: str) -> tuple[int, str]:
@@ -160,9 +159,8 @@ def score_structure(
     in ddG prediction, call with the same seed for wild-type and mutant.
 
     Args:
-        model: ProteinMPNN or LigandMPNN model (set to eval externally).
-        input_features: Batched feature dict (B=1) — should already include
-            ligand context tensors when ``model`` is a ``LigandMPNN``.
+        model: ProteinMPNN model (set to eval externally).
+        input_features: Batched feature dict (B=1).
         score_mask: ``(1, L)`` mask of positions to score.
         seed: Random seed for reproducible decoding order.
         structure_noise: Gaussian noise std for backbone coordinates (A).
@@ -202,13 +200,13 @@ def score_complex(
 ) -> torch.Tensor:
     """Score a complex by averaging per-residue log-probabilities.
 
-    Loads a structure file, builds the appropriate ProteinMPNN or LigandMPNN
-    batch, and runs ``num_samples`` teacher-forced scoring passes with
-    independent decoding orders. Returns the mean per-residue
-    log-probability at every designed position.
+    Loads a structure file, builds a ProteinMPNN batch, and runs
+    ``num_samples`` teacher-forced scoring passes with independent decoding
+    orders. Returns the mean per-residue log-probability at every designed
+    position.
 
     Args:
-        model: ProteinMPNN or LigandMPNN model.
+        model: ProteinMPNN model.
         structure_path: Path to a PDB or mmCIF file.
         designed_chains: Chain IDs whose residues are scored. Defaults to
             all chains in the structure (i.e., score every residue).
@@ -297,7 +295,7 @@ def predict_ddg(
     sample) for variance reduction.
 
     Args:
-        model: ProteinMPNN or LigandMPNN model.
+        model: ProteinMPNN model.
         structure_path: Path to PDB/mmCIF structure file.
         mutations: ``{chain_id: {mutation_str: None}}`` where each
             mutation_str is formatted as ``"A45G"`` or ``"L52aG"``

@@ -148,7 +148,7 @@ class TestProteinFeaturesLigand:
         assert "ligand_subgraph_nodes" in result
         assert "ligand_subgraph_edges" in result
         assert "ligand_subgraph_Y_m" in result
-        Kc = min(pfl.num_context_atoms, N_atoms)
+        Kc = min(pfl.context_k, N_atoms)
         assert result["E_protein_to_ligand"].shape == (B, L, Kc, 128)
         assert result["ligand_subgraph_nodes"].shape == (B, L, Kc, 128)
         assert result["ligand_subgraph_edges"].shape == (B, L, Kc, Kc, 128)

@@ -149,7 +149,7 @@ BACKBONE_ATOMS: tuple[str, ...] = ("N", "CA", "C", "O", "CB")
 NUM_RBF_ATOMS: int = 5
 NUM_RBF_PAIRS: int = NUM_RBF_ATOMS**2  # 25
 
-# Side-chain atom names for LigandMPNN atomization (indices 4–35 in ATOM_ORDER)
+# Side-chain atom names for sidechain atomization (indices 4–35 in ATOM_ORDER)
 # Foundry uses 32 side-chain atoms (CB through NZ, excluding OXT)
 SIDE_CHAIN_ATOM_NAMES: tuple[str, ...] = ATOM_ORDER[4:36]  # CB through NZ
 NUM_SIDE_CHAIN_ATOMS: int = len(SIDE_CHAIN_ATOM_NAMES)  # 32
@@ -183,7 +183,7 @@ def _enumerate_pairs_current() -> list[tuple[str, str]]:
     return [(a, b) for a in atoms for b in atoms]
 
 
-# The exact legacy pair ordering from the dauparas ProteinMPNN/LigandMPNN code,
+# The exact legacy pair ordering from the dauparas ProteinMPNN code,
 # as documented in Foundry's ``mpnn.utils.weights.load_legacy_weights``.
 _LEGACY_PAIR_ORDER: list[tuple[str, str]] = [
     ("CA", "CA"),  # 0

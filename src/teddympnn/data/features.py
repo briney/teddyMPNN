@@ -1,7 +1,7 @@
 """Structure parsing and feature computation from PDB/mmCIF files.
 
 Converts structural files into the feature tensor format consumed by
-ProteinMPNN and LigandMPNN models.
+ProteinMPNN models.
 """
 
 from __future__ import annotations
@@ -46,7 +46,7 @@ MODIFIED_AA_MAP: dict[str, str] = {
     "MLZ": "LYS",  # n-monomethyl-lysine
 }
 
-# Element symbol → atom type index for LigandMPNN (0-indexed by atomic number)
+# Element symbol → atom type index (0-indexed by atomic number)
 # 118 elements (H=0 ... Og=117) + unknown (118) = 119 total
 _ELEMENTS: tuple[str, ...] = (
     "H",
@@ -390,7 +390,7 @@ def extract_ligand_atoms(path: str | Path) -> dict[str, torch.Tensor]:
 
     Extracts HETATM records excluding water and common buffer ions,
     returning coordinates, validity masks, and element type indices
-    for LigandMPNN context encoding.
+    for ligand context encoding.
 
     Args:
         path: Path to a structure file.
@@ -486,7 +486,7 @@ def extract_sidechain_atoms(
     S: torch.Tensor,
     mask: torch.Tensor,
 ) -> dict[str, torch.Tensor]:
-    """Extract side-chain atoms from selected residues for LigandMPNN context.
+    """Extract side-chain atoms from selected residues for ligand context.
 
     Gathers resolved side-chain atom coordinates from residues indicated by
     ``mask`` (typically the fixed/conditioning partner), formatted as

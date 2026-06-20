@@ -1,4 +1,4 @@
-"""Legacy ↔ current weight conversion for dauparas/ProteinMPNN and dauparas/LigandMPNN.
+"""Legacy ↔ current weight conversion for dauparas/ProteinMPNN.
 
 Legacy checkpoints use different module names, token ordering, and RBF pair
 ordering. This module handles all the transformations needed to load legacy
@@ -40,7 +40,7 @@ _LEGACY_TO_CURRENT_KEY_MAP: list[tuple[str, str]] = [
     ),
     ("features.edge_embedding", "graph_featurization_module.edge_embedding"),
     ("features.norm_edges", "graph_featurization_module.edge_norm"),
-    # LigandMPNN-specific graph featurization
+    # Protein-ligand graph featurization
     ("features.node_project_down", "graph_featurization_module.node_embedding"),
     ("features.norm_nodes", "graph_featurization_module.node_norm"),
     ("features.type_linear", "graph_featurization_module.embed_atom_type_features"),
@@ -48,7 +48,7 @@ _LEGACY_TO_CURRENT_KEY_MAP: list[tuple[str, str]] = [
     ("features.y_edges", "graph_featurization_module.ligand_subgraph_edge_embedding"),
     ("features.norm_y_nodes", "graph_featurization_module.ligand_subgraph_node_norm"),
     ("features.norm_y_edges", "graph_featurization_module.ligand_subgraph_edge_norm"),
-    # LigandMPNN context encoder
+    # Protein-ligand context encoder
     ("W_v", "W_protein_to_ligand_edges_embed"),
     ("W_c", "W_protein_encoding_embed"),
     ("W_nodes_y", "W_ligand_nodes_embed"),
@@ -169,7 +169,7 @@ def _drop_120th_atom_type(
 ) -> None:
     """Drop the 120th atom type (legacy has 120, current has 119).
 
-    Affects LigandMPNN embedding weights that have atom type as input dim.
+    Affects embedding weights that have atom type as input dim.
     """
     keys_to_check = [
         "graph_featurization_module.embed_atom_type_features.weight",
@@ -201,7 +201,7 @@ def _restore_120th_atom_type(
 
     Re-inserts a zero column at index 119 in the input dimension of the
     atom-type-embedding weights so the resulting shape matches the legacy
-    120-atom-type vocabulary expected by dauparas/LigandMPNN.
+    120-atom-type vocabulary expected by the legacy dauparas checkpoints.
     """
     keys_to_check = [
         "graph_featurization_module.embed_atom_type_features.weight",
@@ -230,7 +230,7 @@ def load_legacy_weights(
     1. Rename keys (features.* → graph_featurization_module.*, etc.)
     2. Reorder token embeddings in W_s and W_out
     3. Reorder RBF atom pairs in edge_embedding
-    4. Drop 120th atom type (LigandMPNN only)
+    4. Drop 120th atom type (legacy format only)
     5. Copy registered buffers from model (not checkpoint)
 
     Args:
@@ -286,7 +286,7 @@ def convert_to_legacy(state_dict: dict[str, torch.Tensor]) -> OrderedDict[str, t
     Applies reverse transformations:
     1. Reorder tokens back to 1-letter alphabetical.
     2. Reorder RBF pairs back to same-atom-first.
-    3. Restore the 120th atom-type slot (LigandMPNN only).
+    3. Restore the 120th atom-type slot (legacy format only).
     4. Rename keys to legacy naming.
 
     Args:
@@ -305,7 +305,7 @@ def convert_to_legacy(state_dict: dict[str, torch.Tensor]) -> OrderedDict[str, t
     rbf_perm = current_to_legacy_rbf_permutation()
     _reorder_rbf_weights(legacy, rbf_perm)
 
-    # Restore dropped 120th atom type for LigandMPNN exports.
+    # Restore dropped 120th atom type for legacy exports.
     _restore_120th_atom_type(legacy)
 
     # Rename keys

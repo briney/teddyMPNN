@@ -50,7 +50,7 @@ class PPIDataset(Dataset[dict[str, Any]]):
         cache_dir: Optional directory for caching parsed features as ``.pt``.
         max_residues: Skip structures with more residues than this.
         min_interface_contacts: Skip structures with fewer interface residues.
-        include_ligand_atoms: Extract non-protein atoms for LigandMPNN.
+        include_ligand_atoms: Extract non-protein atoms for ligand context.
         atomize_partner_sidechains: Include fixed-partner side-chain atoms
             in the ligand context (Y/Y_m/Y_t).
     """
