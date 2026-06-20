@@ -77,12 +77,6 @@ class TestCLIHelp:
         result = runner.invoke(app, ["evaluate", "recovery", "--help"])
         assert result.exit_code == 0
 
-    def test_evaluate_benchmark_help(self) -> None:
-        """evaluate benchmark --help works."""
-        result = runner.invoke(app, ["evaluate", "benchmark", "--help"])
-        assert result.exit_code == 0
-        assert "config" in result.output.lower()
-
     def test_evaluate_ddg_help(self) -> None:
         """evaluate ddg --help works."""
         result = runner.invoke(app, ["evaluate", "ddg", "--help"])

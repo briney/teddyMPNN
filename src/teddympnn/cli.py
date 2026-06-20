@@ -281,64 +281,6 @@ def recovery(
 
 
 @evaluate_app.command()
-def benchmark(
-    config: Annotated[Path, typer.Option(help="Benchmark config YAML.")] = ...,  # type: ignore[assignment]
-    output: Annotated[Path | None, typer.Option(help="Output JSON report path.")] = None,
-) -> None:
-    """Run benchmarks across multiple models and print comparison tables.
-
-    The config YAML should have the structure::
-
-        models:
-          - name: "vanilla ProteinMPNN"
-            checkpoint: "weights/v_48_020.pt"
-            model_type: "protein_mpnn"
-          - name: "teddyMPNN run1"
-            checkpoint: "outputs/run1/checkpoints/step_0300000.pt"
-            model_type: "protein_mpnn"
-
-        test_manifests:
-          teddymer: "data/manifests/val_manifest.tsv"
-          pdb: "data/manifests/val_manifest.tsv"
-
-        skempi_dir: "data/skempi"
-        num_samples: 20
-    """
-    import yaml
-
-    from teddympnn.evaluation.benchmark import (
-        ModelSpec,
-        print_comparison_table,
-        run_benchmark,
-    )
-
-    with open(config) as f:
-        cfg = yaml.safe_load(f)
-
-    models = [ModelSpec(**m) for m in cfg["models"]]
-
-    test_manifests = None
-    if "test_manifests" in cfg:
-        test_manifests = {k: Path(v) for k, v in cfg["test_manifests"].items()}
-
-    skempi_dir = Path(cfg["skempi_dir"]) if cfg.get("skempi_dir") else None
-    num_samples = cfg.get("num_samples", 20)
-
-    report = run_benchmark(
-        models,
-        test_manifests=test_manifests,
-        skempi_dir=skempi_dir,
-        num_samples=num_samples,
-    )
-
-    print_comparison_table(report)
-
-    if output is not None:
-        report.save_json(output)
-        typer.echo(f"Report saved to {output}")
-
-
-@evaluate_app.command()
 def ddg(
     checkpoint: Annotated[Path, typer.Option(help="Model checkpoint path.")] = ...,  # type: ignore[assignment]
     skempi: Annotated[Path, typer.Option(help="SKEMPI data directory.")] = ...,  # type: ignore[assignment]
