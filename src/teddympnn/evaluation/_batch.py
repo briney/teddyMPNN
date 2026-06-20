@@ -81,7 +81,6 @@ def build_eval_batch(
     device: torch.device,
     *,
     fixed_residue_mask: torch.Tensor | None = None,
-    include_partner_sidechains: bool = True,
 ) -> dict[str, torch.Tensor]:
     """Create a single-example (B=1) batch from unbatched features.
 
@@ -91,7 +90,6 @@ def build_eval_batch(
         device: Device to place batch tensors on.
         fixed_residue_mask: ``(L,)`` bool — True at fixed-partner residues.
             Defaults to ``~designed_mask``.
-        include_partner_sidechains: Unused; kept for API compatibility.
 
     Returns:
         Batched feature dict (B=1) ready for ``model(...)``/``model.score``.

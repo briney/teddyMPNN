@@ -184,12 +184,14 @@ src/teddympnn/
 ├── config.py                    # Pydantic config models
 ├── models/
 │   ├── protein_mpnn.py          # ProteinMPNN nn.Module
+│   ├── tokens.py                # Amino-acid token vocabulary
 │   └── layers/                  # EncLayer, DecLayer, ProteinFeatures, etc.
 ├── data/
 │   ├── dataset.py               # PPIDataset
 │   ├── teddymer.py              # Teddymer download + preprocessing
 │   ├── pdb_complexes.py         # PDB experimental complexes
 │   ├── features.py              # PDB/mmCIF → feature tensors
+│   ├── splits.py                # Train/val/test split utilities
 │   ├── sampler.py               # Token-budget batch sampler
 │   └── collator.py              # Padding collator
 ├── training/
@@ -202,5 +204,6 @@ src/teddympnn/
 │   └── skempi.py                # SKEMPI v2.0 utilities
 └── weights/
     ├── io.py                    # Checkpoint bundle I/O
-    └── foundry.py               # Foundry load (import only)
+    ├── foundry.py               # Foundry checkpoint loading
+    └── legacy.py                # Legacy dauparas/IPD checkpoint loading
 ```

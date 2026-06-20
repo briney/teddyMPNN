@@ -1,13 +1,14 @@
 #!/usr/bin/env python
 """Generate Foundry reference tensors for equivalence testing.
 
-Runs inside the brineylab/ligandmpnn Docker container. Uses Foundry's own
-forward() method to produce canonical reference outputs for comparison.
+Runs inside a Docker container with Foundry (brineylab/foundry) installed.
+Uses Foundry's own forward() method to produce canonical ProteinMPNN reference
+outputs for comparison against teddyMPNN.
 
 Usage (from repo root):
     docker run --rm --gpus all \
         -v $PWD/tests/validation/reference_data:/data \
-        --entrypoint python3 brineylab/ligandmpnn:latest \
+        --entrypoint python3 <foundry-image> \
         /data/generate_foundry_reference.py
 """
 

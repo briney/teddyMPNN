@@ -1,8 +1,8 @@
 """Native teddyMPNN checkpoint bundle I/O.
 
 The canonical training artifact is a native checkpoint bundle that stores
-model state alongside compatibility metadata needed for export to other
-ecosystems (Foundry, legacy dauparas repos).
+model state, optimizer state, scheduler state, and current training step,
+alongside provenance metadata that records format compatibility.
 """
 
 from __future__ import annotations

@@ -24,6 +24,6 @@ Original distribution: https://files.ipd.uw.edu/pub/ligandmpnn/
 
 ## License
 
-Both upstream repositories are MIT-licensed. Redistribution is permitted; this
+The upstream repository is MIT-licensed. Redistribution is permitted; this
 NOTICES.md file preserves attribution to the upstream authors. See the
-respective repositories for the full license text.
+repository for the full license text.
