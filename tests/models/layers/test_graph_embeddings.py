@@ -6,7 +6,6 @@ import torch
 
 from teddympnn.models.layers.graph_embeddings import (
     ProteinFeatures,
-    ProteinFeaturesLigand,
     compute_knn,
     compute_virtual_cb,
     rbf_encode,
@@ -125,74 +124,3 @@ class TestProteinFeatures:
 
         # Noise only applied in training mode
         assert not torch.allclose(out_train["E"], out_eval["E"])
-
-
-class TestProteinFeaturesLigand:
-    def test_output_shapes(self) -> None:
-        B, L, N_atoms = 2, 10, 8
-        K = 5
-        pfl = ProteinFeaturesLigand(top_k=K)
-        X = torch.randn(B, L, 4, 3)
-        mask = torch.ones(B, L)
-        R_idx = torch.arange(L).unsqueeze(0).expand(B, -1)
-        chain = torch.zeros(B, L, dtype=torch.long)
-        Y = torch.randn(B, N_atoms, 3)
-        Y_m = torch.ones(B, N_atoms)
-        Y_t = torch.randint(0, 119, (B, N_atoms))
-
-        result = pfl(X, mask, R_idx, chain, Y, Y_m, Y_t)
-
-        assert "E_idx" in result
-        assert "E" in result
-        assert "E_protein_to_ligand" in result
-        assert "ligand_subgraph_nodes" in result
-        assert "ligand_subgraph_edges" in result
-        assert "ligand_subgraph_Y_m" in result
-        Kc = min(pfl.num_context_atoms, N_atoms)
-        assert result["E_protein_to_ligand"].shape == (B, L, Kc, 128)
-        assert result["ligand_subgraph_nodes"].shape == (B, L, Kc, 128)
-        assert result["ligand_subgraph_edges"].shape == (B, L, Kc, Kc, 128)
-        assert result["ligand_subgraph_Y_m"].shape == (B, L, Kc)
-
-    def test_additional_attribute_names(self) -> None:
-        pfl = ProteinFeaturesLigand()
-        for attr in [
-            "embed_atom_type_features",
-            "node_embedding",
-            "node_norm",
-            "ligand_subgraph_node_embedding",
-            "ligand_subgraph_node_norm",
-            "ligand_subgraph_edge_embedding",
-            "ligand_subgraph_edge_norm",
-        ]:
-            assert hasattr(pfl, attr), f"Missing attribute: {attr}"
-
-    def test_registered_buffers(self) -> None:
-        pfl = ProteinFeaturesLigand()
-        assert hasattr(pfl, "side_chain_atom_types")
-        assert hasattr(pfl, "periodic_table_groups")
-        assert hasattr(pfl, "periodic_table_periods")
-
-    def test_masks_invalid_atoms(self) -> None:
-        B, L, N_atoms = 1, 5, 4
-        pfl = ProteinFeaturesLigand(top_k=3)
-        X = torch.randn(B, L, 4, 3)
-        mask = torch.ones(B, L)
-        R_idx = torch.arange(L).unsqueeze(0)
-        chain = torch.zeros(B, L, dtype=torch.long)
-        Y = torch.randn(B, N_atoms, 3)
-        Y_m = torch.zeros(B, N_atoms)  # All atoms masked
-        Y_t = torch.zeros(B, N_atoms, dtype=torch.long)
-
-        result = pfl(X, mask, R_idx, chain, Y, Y_m, Y_t)
-        # Foundry semantics: featurization doesn't zero invalid-atom node/edge
-        # embeddings; downstream message passing masks via ligand_subgraph_Y_m.
-        # The propagated mask must be all-zero.
-        assert torch.equal(
-            result["ligand_subgraph_Y_m"],
-            torch.zeros_like(result["ligand_subgraph_Y_m"]),
-        )
-        assert torch.equal(
-            result["ligand_subgraph_Y_m_edges"],
-            torch.zeros_like(result["ligand_subgraph_Y_m_edges"]),
-        )

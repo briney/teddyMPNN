@@ -16,9 +16,6 @@ app = typer.Typer(
 download_app = typer.Typer(help="Download and prepare datasets.")
 app.add_typer(download_app, name="download")
 
-checkpoints_app = typer.Typer(help="Checkpoint management.")
-app.add_typer(checkpoints_app, name="checkpoints")
-
 evaluate_app = typer.Typer(help="Evaluate a trained model.")
 app.add_typer(evaluate_app, name="evaluate")
 
@@ -88,42 +85,12 @@ def teddymer(
         typer.echo(f"Failures: {result.failures_path} ({result.failures})")
 
 
-@download_app.command("nvidia-complexes")
-def nvidia_complexes(
-    output: Annotated[Path, typer.Option(help="Output directory.")] = Path("data/nvidia_complexes"),
-    min_ipsae: Annotated[float, typer.Option(help="Min ipSAE score.")] = 0.6,
-    min_plddt: Annotated[float, typer.Option(help="Min average pLDDT.")] = 70.0,
-    max_clashes: Annotated[int, typer.Option(help="Max backbone clashes.")] = 10,
-) -> None:
-    """Download and filter NVIDIA predicted complexes."""
-    from teddympnn.data.nvidia_complexes import (
-        download_nvidia_chunks,
-        download_nvidia_metadata,
-        extract_nvidia_structures,
-        filter_nvidia_metadata,
-    )
-
-    csv_path = download_nvidia_metadata(output / "metadata")
-    manifest_path = output / "filtered_manifest.tsv"
-    filter_nvidia_metadata(
-        csv_path,
-        manifest_path,
-        min_ipsae=min_ipsae,
-        min_plddt=min_plddt,
-        max_clashes=max_clashes,
-    )
-    download_nvidia_chunks(manifest_path, output / "chunks")
-    extract_nvidia_structures(manifest_path, output / "chunks", output / "structures")
-    typer.echo(f"NVIDIA complexes data prepared in {output}")
-
-
 @download_app.command("prepare-manifests")
 def prepare_manifests_cmd(
     output: Annotated[Path, typer.Option(help="Output directory for manifests.")] = Path(
         "data/manifests"
     ),
     teddymer: Annotated[Path | None, typer.Option(help="Teddymer filtered manifest.")] = None,
-    nvidia: Annotated[Path | None, typer.Option(help="NVIDIA filtered manifest.")] = None,
     pdb: Annotated[Path | None, typer.Option(help="PDB complexes manifest.")] = None,
     val_fraction: Annotated[float, typer.Option(help="Validation fraction.")] = 0.05,
     seed: Annotated[int, typer.Option(help="Random seed for splitting.")] = 42,
@@ -134,7 +101,6 @@ def prepare_manifests_cmd(
     train_path, val_path = prepare_manifests(
         output,
         teddymer_manifest=teddymer,
-        nvidia_manifest=nvidia,
         pdb_manifest=pdb,
         val_fraction=val_fraction,
         seed=seed,
@@ -146,9 +112,7 @@ def prepare_manifests_cmd(
 
 @download_app.command()
 def pretrained(
-    model: Annotated[
-        str, typer.Option(help="Model type: protein_mpnn or ligand_mpnn.")
-    ] = "ligand_mpnn",
+    model: Annotated[str, typer.Option(help="Model type (protein_mpnn).")] = "protein_mpnn",
     noise: Annotated[str, typer.Option(help="Noise level (e.g. 020, 010).")] = "020",
     output: Annotated[Path, typer.Option(help="Output directory.")] = Path("weights"),
 ) -> None:
@@ -197,33 +161,6 @@ def train(
 
 
 # ---------------------------------------------------------------------------
-# Checkpoint subcommands
-# ---------------------------------------------------------------------------
-
-
-@checkpoints_app.command("export-foundry")
-def export_foundry(
-    checkpoint: Annotated[Path, typer.Option(help="teddyMPNN checkpoint path.")] = ...,  # type: ignore[assignment]
-    output: Annotated[Path, typer.Option(help="Output Foundry checkpoint path.")] = ...,  # type: ignore[assignment]
-    model_type: Annotated[
-        str, typer.Option(help="Model type: protein_mpnn or ligand_mpnn.")
-    ] = "protein_mpnn",
-) -> None:
-    """Export a teddyMPNN checkpoint to Foundry format."""
-
-    from teddympnn.models import LigandMPNN, ProteinMPNN
-    from teddympnn.weights.foundry import export_foundry_checkpoint
-    from teddympnn.weights.io import load_checkpoint_bundle
-
-    model_cls = LigandMPNN if model_type == "ligand_mpnn" else ProteinMPNN
-    model = model_cls()
-
-    bundle = load_checkpoint_bundle(checkpoint, model, map_location="cpu")
-    export_foundry_checkpoint(output, model, config=bundle.get("config"))
-    typer.echo(f"Exported Foundry checkpoint to {output}")
-
-
-# ---------------------------------------------------------------------------
 # Evaluate subcommands
 # ---------------------------------------------------------------------------
 
@@ -232,9 +169,6 @@ def export_foundry(
 def recovery(
     checkpoint: Annotated[Path, typer.Option(help="Model checkpoint path.")] = ...,  # type: ignore[assignment]
     data: Annotated[Path, typer.Option(help="Test data manifest path.")] = ...,  # type: ignore[assignment]
-    model_type: Annotated[
-        str, typer.Option(help="Model type: protein_mpnn or ligand_mpnn.")
-    ] = "protein_mpnn",
     interface_cutoff: Annotated[
         float, typer.Option(help="CB-CB distance cutoff for interface residues (A).")
     ] = 8.0,
@@ -246,17 +180,16 @@ def recovery(
     from teddympnn.data.dataset import PPIDataset
     from teddympnn.data.sampler import TokenBudgetBatchSampler
     from teddympnn.evaluation.sequence_recovery import compute_recovery
-    from teddympnn.models import LigandMPNN, ProteinMPNN
+    from teddympnn.models import ProteinMPNN
     from teddympnn.weights.io import load_model_weights
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    model_cls = LigandMPNN if model_type == "ligand_mpnn" else ProteinMPNN
-    model = model_cls()
+    model = ProteinMPNN()
     load_model_weights(checkpoint, model, map_location=device)
     model = model.to(device)
 
-    dataset = PPIDataset(data, include_ligand_atoms=(model_type == "ligand_mpnn"))
+    dataset = PPIDataset(data)
     collator = PaddingCollator()
     sampler = TokenBudgetBatchSampler(dataset.lengths, token_budget=10_000, shuffle=False)
     loader = torch.utils.data.DataLoader(dataset, batch_sampler=sampler, collate_fn=collator)
@@ -281,71 +214,10 @@ def recovery(
 
 
 @evaluate_app.command()
-def benchmark(
-    config: Annotated[Path, typer.Option(help="Benchmark config YAML.")] = ...,  # type: ignore[assignment]
-    output: Annotated[Path | None, typer.Option(help="Output JSON report path.")] = None,
-) -> None:
-    """Run benchmarks across multiple models and print comparison tables.
-
-    The config YAML should have the structure::
-
-        models:
-          - name: "vanilla ProteinMPNN"
-            checkpoint: "weights/v_48_020.pt"
-            model_type: "protein_mpnn"
-          - name: "teddyMPNN run1"
-            checkpoint: "outputs/run1/checkpoints/step_0300000.pt"
-            model_type: "protein_mpnn"
-
-        test_manifests:
-          teddymer: "data/manifests/val_manifest.tsv"
-          pdb: "data/manifests/val_manifest.tsv"
-
-        skempi_dir: "data/skempi"
-        num_samples: 20
-    """
-    import yaml
-
-    from teddympnn.evaluation.benchmark import (
-        ModelSpec,
-        print_comparison_table,
-        run_benchmark,
-    )
-
-    with open(config) as f:
-        cfg = yaml.safe_load(f)
-
-    models = [ModelSpec(**m) for m in cfg["models"]]
-
-    test_manifests = None
-    if "test_manifests" in cfg:
-        test_manifests = {k: Path(v) for k, v in cfg["test_manifests"].items()}
-
-    skempi_dir = Path(cfg["skempi_dir"]) if cfg.get("skempi_dir") else None
-    num_samples = cfg.get("num_samples", 20)
-
-    report = run_benchmark(
-        models,
-        test_manifests=test_manifests,
-        skempi_dir=skempi_dir,
-        num_samples=num_samples,
-    )
-
-    print_comparison_table(report)
-
-    if output is not None:
-        report.save_json(output)
-        typer.echo(f"Report saved to {output}")
-
-
-@evaluate_app.command()
 def ddg(
     checkpoint: Annotated[Path, typer.Option(help="Model checkpoint path.")] = ...,  # type: ignore[assignment]
     skempi: Annotated[Path, typer.Option(help="SKEMPI data directory.")] = ...,  # type: ignore[assignment]
     num_samples: Annotated[int, typer.Option(help="Monte Carlo samples.")] = 20,
-    model_type: Annotated[
-        str, typer.Option(help="Model type: protein_mpnn or ligand_mpnn.")
-    ] = "protein_mpnn",
     noise: Annotated[float, typer.Option(help="Backbone noise for scoring (A).")] = 0.0,
     max_entries: Annotated[int | None, typer.Option(help="Limit entries (for testing).")] = None,
 ) -> None:
@@ -353,13 +225,12 @@ def ddg(
     import torch
 
     from teddympnn.evaluation.skempi import evaluate_skempi
-    from teddympnn.models import LigandMPNN, ProteinMPNN
+    from teddympnn.models import ProteinMPNN
     from teddympnn.weights.io import load_model_weights
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    model_cls = LigandMPNN if model_type == "ligand_mpnn" else ProteinMPNN
-    model = model_cls()
+    model = ProteinMPNN()
     load_model_weights(checkpoint, model, map_location=device)
     model = model.to(device)
 
@@ -394,26 +265,20 @@ def score(
     pdb: Annotated[Path, typer.Option(help="PDB/mmCIF structure file.")] = ...,  # type: ignore[assignment]
     chains: Annotated[str, typer.Option(help="Design chain IDs (comma-separated).")] = ...,  # type: ignore[assignment]
     num_samples: Annotated[int, typer.Option(help="Monte Carlo samples.")] = 1,
-    model_type: Annotated[
-        str, typer.Option(help="Model type: protein_mpnn or ligand_mpnn.")
-    ] = "protein_mpnn",
 ) -> None:
     """Score a structure with a trained model."""
     import torch
 
     from teddympnn.data.features import (
         derive_backbone,
-        extract_ligand_atoms,
-        extract_sidechain_atoms,
         parse_structure,
     )
-    from teddympnn.models import LigandMPNN, ProteinMPNN
+    from teddympnn.models import ProteinMPNN
     from teddympnn.weights.io import load_model_weights
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    model_cls = LigandMPNN if model_type == "ligand_mpnn" else ProteinMPNN
-    model = model_cls()
+    model = ProteinMPNN()
     load_model_weights(checkpoint, model, map_location=device)
     model = model.to(device)
 
@@ -440,24 +305,6 @@ def score(
         "designed_residue_mask": designed.unsqueeze(0).to(device),
         "fixed_residue_mask": (~designed).unsqueeze(0).to(device),
     }
-    if model_type == "ligand_mpnn":
-        ligand = extract_ligand_atoms(pdb)
-        sidechains = extract_sidechain_atoms(
-            features["xyz_37"],
-            features["xyz_37_m"],
-            features["S"],
-            ~designed,
-        )
-        Y = ligand["Y"]
-        Y_m = ligand["Y_m"]
-        Y_t = ligand["Y_t"]
-        if sidechains["Y"].shape[0] > 0:
-            Y = torch.cat([Y, sidechains["Y"]], dim=0)
-            Y_m = torch.cat([Y_m, sidechains["Y_m"]], dim=0)
-            Y_t = torch.cat([Y_t, sidechains["Y_t"]], dim=0)
-        batch["Y"] = Y.unsqueeze(0).to(device)
-        batch["Y_m"] = Y_m.unsqueeze(0).to(device)
-        batch["Y_t"] = Y_t.unsqueeze(0).to(device)
 
     scores = []
     for _ in range(num_samples):

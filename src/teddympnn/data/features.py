@@ -1,7 +1,7 @@
 """Structure parsing and feature computation from PDB/mmCIF files.
 
 Converts structural files into the feature tensor format consumed by
-ProteinMPNN and LigandMPNN models.
+ProteinMPNN models.
 """
 
 from __future__ import annotations
@@ -16,7 +16,6 @@ from Bio.PDB import MMCIFParser, PDBParser  # type: ignore[attr-defined]
 from Bio.PDB.Residue import Residue  # noqa: TC002 — used in type annotations
 
 from teddympnn.models.tokens import (
-    ATOM_ORDER,
     BACKBONE_ATOM_INDICES,
     NUM_ATOMS_37,
     atom_to_idx,
@@ -45,136 +44,6 @@ MODIFIED_AA_MAP: dict[str, str] = {
     "MLY": "LYS",  # n-dimethyl-lysine
     "MLZ": "LYS",  # n-monomethyl-lysine
 }
-
-# Element symbol → atom type index for LigandMPNN (0-indexed by atomic number)
-# 118 elements (H=0 ... Og=117) + unknown (118) = 119 total
-_ELEMENTS: tuple[str, ...] = (
-    "H",
-    "HE",
-    "LI",
-    "BE",
-    "B",
-    "C",
-    "N",
-    "O",
-    "F",
-    "NE",
-    "NA",
-    "MG",
-    "AL",
-    "SI",
-    "P",
-    "S",
-    "CL",
-    "AR",
-    "K",
-    "CA",
-    "SC",
-    "TI",
-    "V",
-    "CR",
-    "MN",
-    "FE",
-    "CO",
-    "NI",
-    "CU",
-    "ZN",
-    "GA",
-    "GE",
-    "AS",
-    "SE",
-    "BR",
-    "KR",
-    "RB",
-    "SR",
-    "Y",
-    "ZR",
-    "NB",
-    "MO",
-    "TC",
-    "RU",
-    "RH",
-    "PD",
-    "AG",
-    "CD",
-    "IN",
-    "SN",
-    "SB",
-    "TE",
-    "I",
-    "XE",
-    "CS",
-    "BA",
-    "LA",
-    "CE",
-    "PR",
-    "ND",
-    "PM",
-    "SM",
-    "EU",
-    "GD",
-    "TB",
-    "DY",
-    "HO",
-    "ER",
-    "TM",
-    "YB",
-    "LU",
-    "HF",
-    "TA",
-    "W",
-    "RE",
-    "OS",
-    "IR",
-    "PT",
-    "AU",
-    "HG",
-    "TL",
-    "PB",
-    "BI",
-    "PO",
-    "AT",
-    "RN",
-    "FR",
-    "RA",
-    "AC",
-    "TH",
-    "PA",
-    "U",
-    "NP",
-    "PU",
-    "AM",
-    "CM",
-    "BK",
-    "CF",
-    "ES",
-    "FM",
-    "MD",
-    "NO",
-    "LR",
-    "RF",
-    "DB",
-    "SG",
-    "BH",
-    "HS",
-    "MT",
-    "DS",
-    "RG",
-    "CN",
-    "NH",
-    "FL",
-    "MC",
-    "LV",
-    "TS",
-    "OG",
-)
-NUM_ELEMENT_TYPES: int = 119
-UNK_ELEMENT_IDX: int = 118
-element_to_idx: dict[str, int] = {sym: i for i, sym in enumerate(_ELEMENTS)}
-
-# Residue names excluded from ligand atom extraction
-EXCLUDED_LIGAND_RESIDUES: frozenset[str] = frozenset({"HOH", "WAT", "DOD"})
-EXCLUDED_IONS: frozenset[str] = frozenset({"NA", "CL", "K", "BR"})
 
 # Virtual CB coefficients (identical to graph_embeddings.py)
 _CB_A: float = -0.58273431
@@ -385,67 +254,6 @@ def derive_backbone(
     return xyz_37[..., idx, :], xyz_37_m[..., idx]
 
 
-def extract_ligand_atoms(path: str | Path) -> dict[str, torch.Tensor]:
-    """Extract non-protein atoms from a PDB or mmCIF file.
-
-    Extracts HETATM records excluding water and common buffer ions,
-    returning coordinates, validity masks, and element type indices
-    for LigandMPNN context encoding.
-
-    Args:
-        path: Path to a structure file.
-
-    Returns:
-        Dict with keys:
-
-        - ``Y``: ``(N, 3)`` float32 — non-protein atom coordinates.
-        - ``Y_m``: ``(N,)`` bool — atom validity mask.
-        - ``Y_t``: ``(N,)`` int64 — element type indices (0–118).
-    """
-    path = Path(path)
-    parser = _get_parser(path)
-    structure = parser.get_structure("s", str(path))  # type: ignore[no-untyped-call]
-    model = next(structure.get_models())
-
-    coords_list: list[np.ndarray[Any, Any]] = []
-    types_list: list[int] = []
-
-    for chain in model:
-        for residue in chain:
-            het_flag = residue.id[0]
-            resname = residue.resname.strip()
-
-            # Skip standard protein residues and modified AAs
-            if het_flag == " ":
-                continue
-            if resname in MODIFIED_AA_MAP:
-                continue
-            # Skip water and excluded ions
-            if resname in EXCLUDED_LIGAND_RESIDUES or resname in EXCLUDED_IONS:
-                continue
-
-            for atom in residue:
-                elem = atom.element.strip().upper()
-                if not elem:
-                    continue
-                coords_list.append(atom.coord.astype(np.float32))
-                types_list.append(element_to_idx.get(elem, UNK_ELEMENT_IDX))
-
-    if not coords_list:
-        return {
-            "Y": torch.zeros(0, 3, dtype=torch.float32),
-            "Y_m": torch.zeros(0, dtype=torch.bool),
-            "Y_t": torch.zeros(0, dtype=torch.long),
-        }
-
-    coords = np.stack(coords_list)
-    return {
-        "Y": torch.from_numpy(coords),
-        "Y_m": torch.ones(len(coords_list), dtype=torch.bool),
-        "Y_t": torch.tensor(types_list, dtype=torch.long),
-    }
-
-
 def identify_interface_residues(
     xyz_37: torch.Tensor,
     xyz_37_m: torch.Tensor,
@@ -478,64 +286,3 @@ def identify_interface_residues(
     # Interface: any cross-chain distance below cutoff
     contacts = (dist < distance_cutoff) & cross_chain
     return contacts.any(dim=1)
-
-
-def extract_sidechain_atoms(
-    xyz_37: torch.Tensor,
-    xyz_37_m: torch.Tensor,
-    S: torch.Tensor,
-    mask: torch.Tensor,
-) -> dict[str, torch.Tensor]:
-    """Extract side-chain atoms from selected residues for LigandMPNN context.
-
-    Gathers resolved side-chain atom coordinates from residues indicated by
-    ``mask`` (typically the fixed/conditioning partner), formatted as
-    non-protein context atoms (Y/Y_m/Y_t).
-
-    Args:
-        xyz_37: All-atom coordinates, shape ``(L, 37, 3)``.
-        xyz_37_m: Atom validity mask, shape ``(L, 37)``.
-        S: Token indices, shape ``(L,)``.
-        mask: Boolean mask of residues to include, shape ``(L,)``.
-
-    Returns:
-        Dict with ``Y``, ``Y_m``, ``Y_t`` tensors for side-chain atoms.
-    """
-    # Side-chain atom indices: 4 (CB) through 35 (NZ), excluding terminal OXT.
-    sc_indices = list(range(4, NUM_ATOMS_37 - 1))
-
-    # Gather side-chain coords and masks for selected residues
-    selected = mask.bool()
-    sc_coords = xyz_37[selected][:, sc_indices, :]  # (M, 32, 3)
-    sc_mask = xyz_37_m[selected][:, sc_indices]  # (M, 32)
-
-    # Flatten to (M*32, 3) and filter valid atoms
-    flat_coords = sc_coords.reshape(-1, 3)
-    flat_mask = sc_mask.reshape(-1)
-
-    valid = flat_mask.bool()
-    if not valid.any():
-        return {
-            "Y": torch.zeros(0, 3, dtype=xyz_37.dtype),
-            "Y_m": torch.zeros(0, dtype=torch.bool),
-            "Y_t": torch.zeros(0, dtype=torch.long),
-        }
-
-    # Map side-chain atom names to element types
-    # ATOM_ORDER[4:36] = CB, CG, CG1, ... NZ — extract element from first char
-    sc_atom_names = ATOM_ORDER[4:-1]
-    sc_element_indices: list[int] = []
-    for name in sc_atom_names:
-        elem = name[0].upper()  # C, N, O, S from atom names
-        sc_element_indices.append(element_to_idx.get(elem, UNK_ELEMENT_IDX))
-    elem_per_atom = torch.tensor(sc_element_indices, dtype=torch.long)
-
-    # Tile for all selected residues: (M, 32) → (M*32,)
-    num_selected = int(selected.sum().item())
-    flat_types = elem_per_atom.unsqueeze(0).expand(num_selected, -1).reshape(-1)
-
-    return {
-        "Y": flat_coords[valid],
-        "Y_m": torch.ones(int(valid.sum().item()), dtype=torch.bool),
-        "Y_t": flat_types[valid],
-    }

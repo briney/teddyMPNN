@@ -77,7 +77,7 @@ class TestScoreStructure:
         features = parse_structure(tmp_path / "test.pdb")
         L = len(features["S"])
         designed = torch.ones(L, dtype=torch.bool)
-        batch = build_eval_batch(features, designed, torch.device("cpu"), model_type="protein_mpnn")
+        batch = build_eval_batch(features, designed, torch.device("cpu"))
         mask = torch.ones(1, L, dtype=torch.bool)
 
         s1 = score_structure(model, batch, mask, seed=42)
@@ -95,7 +95,7 @@ class TestScoreStructure:
         features = parse_structure(tmp_path / "test.pdb")
         L = len(features["S"])
         designed = torch.ones(L, dtype=torch.bool)
-        batch = build_eval_batch(features, designed, torch.device("cpu"), model_type="protein_mpnn")
+        batch = build_eval_batch(features, designed, torch.device("cpu"))
         mask = torch.ones(1, L, dtype=torch.bool)
 
         scores = [score_structure(model, batch, mask, seed=i) for i in range(10)]

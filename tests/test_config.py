@@ -53,19 +53,6 @@ class TestModelTypeDefaults:
         assert cfg.model.num_decoder_layers == 3
         assert cfg.model.num_neighbors == 48
         assert cfg.model.dropout == 0.1
-        assert cfg.model.num_context_atoms is None  # not applicable to protein_mpnn
-
-    def test_ligand_mpnn_arch_defaults(self, tmp_path: Path) -> None:
-        """With model_type=ligand_mpnn, defaults pull from LigandMPNN.__init__."""
-        cfg = TrainingConfig.model_validate(
-            {
-                "model_type": "ligand_mpnn",
-                "pretrained_weights": str(tmp_path / "dummy.pt"),
-                "data": {"train": {"pdb": {"path": str(tmp_path / "t.tsv"), "ratio": 1.0}}},
-            },
-        )
-        assert cfg.model.num_neighbors == 32
-        assert cfg.model.num_context_atoms == 25
 
     def test_protein_mpnn_training_defaults(self, tmp_path: Path) -> None:
         """ProteinMPNN training-knob defaults: token_budget=10_000, structure_noise=0.20."""
@@ -79,19 +66,6 @@ class TestModelTypeDefaults:
         assert cfg.token_budget == 10_000
         assert cfg.structure_noise == 0.20
         assert cfg.grad_clip_max_norm is None
-
-    def test_ligand_mpnn_training_defaults(self, tmp_path: Path) -> None:
-        """LigandMPNN training-knob defaults: token_budget=6_000, structure_noise=0.10, clip=1.0."""
-        cfg = TrainingConfig.model_validate(
-            {
-                "model_type": "ligand_mpnn",
-                "pretrained_weights": str(tmp_path / "dummy.pt"),
-                "data": {"train": {"pdb": {"path": str(tmp_path / "t.tsv"), "ratio": 1.0}}},
-            },
-        )
-        assert cfg.token_budget == 6_000
-        assert cfg.structure_noise == 0.10
-        assert cfg.grad_clip_max_norm == 1.0
 
     def test_user_overrides_win(self, tmp_path: Path) -> None:
         """User-provided values for model fields and training knobs are respected."""
@@ -109,18 +83,6 @@ class TestModelTypeDefaults:
         # un-overridden field still defaulted
         assert cfg.model.num_encoder_layers == 3
         assert cfg.token_budget == 12_345
-
-    def test_num_context_atoms_rejected_for_protein_mpnn(self, tmp_path: Path) -> None:
-        """Setting num_context_atoms with model_type=protein_mpnn raises."""
-        with pytest.raises(ValidationError):
-            TrainingConfig.model_validate(
-                {
-                    "model_type": "protein_mpnn",
-                    "model": {"num_context_atoms": 25},
-                    "pretrained_weights": str(tmp_path / "dummy.pt"),
-                    "data": {"train": {"pdb": {"path": str(tmp_path / "t.tsv"), "ratio": 1.0}}},
-                },
-            )
 
     def test_invalid_model_type(self, tmp_path: Path) -> None:
         """Unknown model_type raises ValidationError."""
@@ -236,14 +198,6 @@ class TestLoadTrainingConfig:
         assert cfg.data.train["pdb"].ratio == 0.5
         assert cfg.max_steps == 42
 
-    def test_override_switches_model_type(self, tmp_path: Path) -> None:
-        """Switching model_type via override applies the new model's defaults."""
-        path = _minimal_yaml(tmp_path, model_type="protein_mpnn")
-        cfg = load_training_config(path, ["model_type=ligand_mpnn"])
-        assert cfg.model_type == "ligand_mpnn"
-        assert cfg.model.num_neighbors == 32
-        assert cfg.token_budget == 6_000
-
     def test_no_yaml(self, tmp_path: Path) -> None:
         """With no YAML path, overrides alone can produce a valid config."""
         cfg = load_training_config(
@@ -269,4 +223,3 @@ class TestPlainModels:
         cfg = ModelConfig()
         assert cfg.hidden_dim is None
         assert cfg.num_neighbors is None
-        assert cfg.num_context_atoms is None

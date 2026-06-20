@@ -9,7 +9,7 @@ from teddympnn.data.collator import PaddingCollator
 from teddympnn.models.tokens import NUM_ATOMS_37
 
 
-def _make_example(L: int, N_ligand: int = 0) -> dict[str, torch.Tensor | int]:
+def _make_example(L: int) -> dict[str, torch.Tensor | int]:
     """Create a synthetic feature dict mimicking PPIDataset output."""
     return {
         "xyz_37": torch.randn(L, NUM_ATOMS_37, 3),
@@ -22,15 +22,6 @@ def _make_example(L: int, N_ligand: int = 0) -> dict[str, torch.Tensor | int]:
         "residue_mask": torch.ones(L, dtype=torch.bool),
         "designed_residue_mask": torch.ones(L, dtype=torch.bool),
         "fixed_residue_mask": torch.zeros(L, dtype=torch.bool),
-        "Y": torch.randn(N_ligand, 3) if N_ligand > 0 else torch.zeros(0, 3),
-        "Y_m": (
-            torch.ones(N_ligand, dtype=torch.bool)
-            if N_ligand > 0
-            else torch.zeros(0, dtype=torch.bool)
-        ),
-        "Y_t": (
-            torch.randint(0, 119, (N_ligand,)) if N_ligand > 0 else torch.zeros(0, dtype=torch.long)
-        ),
         "num_residues": L,
     }
 
@@ -93,29 +84,6 @@ class TestPaddingCollator:
 
         assert (result["xyz_37"][0, 20:] == 0.0).all()
 
-    def test_ligand_padding(self):
-        """Ligand tensors should be padded to max N."""
-        collator = PaddingCollator()
-        batch = [_make_example(30, N_ligand=10), _make_example(30, N_ligand=25)]
-        result = collator(batch)
-
-        assert result["Y"].shape == (2, 25, 3)
-        assert result["Y_m"].shape == (2, 25)
-        assert result["Y_t"].shape == (2, 25)
-
-        # First example: ligand atoms 10-24 should be masked
-        assert not result["Y_m"][0, 10:].any()
-
-    def test_empty_ligands(self):
-        """Batch with no ligand atoms should produce empty ligand tensors."""
-        collator = PaddingCollator()
-        batch = [_make_example(30, N_ligand=0), _make_example(40, N_ligand=0)]
-        result = collator(batch)
-
-        assert result["Y"].shape[1] == 0
-        assert result["Y_m"].shape[1] == 0
-        assert result["Y_t"].shape[1] == 0
-
     def test_metadata_collected_as_list(self):
         """Non-tensor values should be collected into lists."""
         collator = PaddingCollator()
@@ -148,3 +116,15 @@ class TestPaddingCollator:
         collator = PaddingCollator()
         with pytest.raises(ValueError, match="empty"):
             collator([])
+
+    def test_collate_pads_interface_mask(self):
+        """interface_residue_mask should be padded to max-L with False."""
+        collator = PaddingCollator()
+        a = _make_example(4)
+        b = _make_example(6)
+        a["interface_residue_mask"] = torch.ones(4, dtype=torch.bool)
+        b["interface_residue_mask"] = torch.zeros(6, dtype=torch.bool)
+        out = collator([a, b])
+        assert out["interface_residue_mask"].shape == (2, 6)
+        assert out["interface_residue_mask"].dtype == torch.bool
+        assert out["interface_residue_mask"][0, 4:].sum() == 0  # padded with False

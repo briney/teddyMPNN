@@ -332,7 +332,7 @@ def evaluate_skempi(
     experimental values.
 
     Args:
-        model: ProteinMPNN or LigandMPNN model.
+        model: ProteinMPNN model.
         skempi_dir: Directory containing (or to download) SKEMPI data.
         num_samples: Monte Carlo samples per ddG prediction.
         structure_noise: Backbone noise for ensemble scoring (A).

@@ -21,16 +21,14 @@ from typing import Any, Literal
 from omegaconf import OmegaConf
 from pydantic import BaseModel, Field, model_validator
 
-from teddympnn.models.ligand_mpnn import LigandMPNN
 from teddympnn.models.protein_mpnn import ProteinMPNN
 from teddympnn.weights.pretrained import default_pretrained_weights
 
-ModelType = Literal["protein_mpnn", "ligand_mpnn"]
-SourceType = Literal["teddymer", "nvidia", "pdb"]
+ModelType = Literal["protein_mpnn"]
+SourceType = Literal["teddymer", "pdb"]
 
 _MODEL_TYPE_TO_CLASS: dict[ModelType, type] = {
     "protein_mpnn": ProteinMPNN,
-    "ligand_mpnn": LigandMPNN,
 }
 
 _MODEL_TYPE_TRAINING_DEFAULTS: dict[ModelType, dict[str, Any]] = {
@@ -38,11 +36,6 @@ _MODEL_TYPE_TRAINING_DEFAULTS: dict[ModelType, dict[str, Any]] = {
         "token_budget": 10_000,
         "structure_noise": 0.20,
         "grad_clip_max_norm": None,
-    },
-    "ligand_mpnn": {
-        "token_budget": 6_000,
-        "structure_noise": 0.10,
-        "grad_clip_max_norm": 1.0,
     },
 }
 
@@ -78,7 +71,6 @@ class ModelConfig(BaseModel):
     num_decoder_layers: int | None = None
     num_neighbors: int | None = None
     dropout: float | None = None
-    num_context_atoms: int | None = None  # ligand_mpnn only
 
 
 class TrainingConfig(BaseModel):
@@ -101,9 +93,7 @@ class TrainingConfig(BaseModel):
     warmup_steps: int = 4_000
     max_steps: int = 300_000
     label_smoothing: float = 0.1
-    atomize_partner_sidechains: bool = True
-    sidechain_atomization_probability: float = 0.5
-    sidechain_atomization_per_residue_probability: float = 0.02
+    interface_weight: float = 1.0  # CE weight multiplier for interface residues (1.0 = standard)
     mixed_precision: bool = True
     gradient_checkpointing: bool = True
     num_workers: int = 8
@@ -118,19 +108,12 @@ class TrainingConfig(BaseModel):
     def apply_model_defaults(self) -> TrainingConfig:
         """Fill model-type-driven defaults for unset fields.
 
-        Architecture defaults come from ``ProteinMPNN.__init__`` /
-        ``LigandMPNN.__init__`` signatures so the model classes are the single
-        source of truth. The model-tuned training knobs (``token_budget``,
-        ``structure_noise``, ``grad_clip_max_norm``) and ``pretrained_weights``
-        are also filled from ``model_type`` when omitted.
+        Architecture defaults come from ``ProteinMPNN.__init__`` signatures so
+        the model class is the single source of truth. The model-tuned training
+        knobs (``token_budget``, ``structure_noise``, ``grad_clip_max_norm``)
+        and ``pretrained_weights`` are also filled from ``model_type`` when omitted.
         """
         model_cls = _MODEL_TYPE_TO_CLASS[self.model_type]
-        is_ligand = self.model_type == "ligand_mpnn"
-
-        # num_context_atoms is meaningful only for ligand_mpnn.
-        if not is_ligand and self.model.num_context_atoms is not None:
-            msg = "num_context_atoms is only valid when model_type='ligand_mpnn'"
-            raise ValueError(msg)
 
         # Architecture defaults from the model class's __init__ signature.
         arch_fields = (
@@ -143,8 +126,6 @@ class TrainingConfig(BaseModel):
         for field in arch_fields:
             if getattr(self.model, field) is None:
                 setattr(self.model, field, _model_init_default(model_cls, field))
-        if is_ligand and self.model.num_context_atoms is None:
-            self.model.num_context_atoms = _model_init_default(model_cls, "num_context_atoms")
 
         # Training knob defaults per model_type.
         defaults = _MODEL_TYPE_TRAINING_DEFAULTS[self.model_type]

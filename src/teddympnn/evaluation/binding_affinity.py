@@ -23,7 +23,6 @@ from teddympnn.evaluation._batch import (
     extract_chain_view,
     load_eval_features,
 )
-from teddympnn.models.ligand_mpnn import LigandMPNN
 
 if TYPE_CHECKING:
     from teddympnn.models.protein_mpnn import ProteinMPNN
@@ -43,10 +42,6 @@ _MUT_BODY_RE = re.compile(r"^(-?\d+)([A-Za-z]?)$")
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
-
-
-def _model_type(model: torch.nn.Module) -> str:
-    return "ligand_mpnn" if isinstance(model, LigandMPNN) else "protein_mpnn"
 
 
 def _parse_mutation_body(body: str) -> tuple[int, str]:
@@ -160,9 +155,8 @@ def score_structure(
     in ddG prediction, call with the same seed for wild-type and mutant.
 
     Args:
-        model: ProteinMPNN or LigandMPNN model (set to eval externally).
-        input_features: Batched feature dict (B=1) — should already include
-            ligand context tensors when ``model`` is a ``LigandMPNN``.
+        model: ProteinMPNN model (set to eval externally).
+        input_features: Batched feature dict (B=1).
         score_mask: ``(1, L)`` mask of positions to score.
         seed: Random seed for reproducible decoding order.
         structure_noise: Gaussian noise std for backbone coordinates (A).
@@ -202,13 +196,13 @@ def score_complex(
 ) -> torch.Tensor:
     """Score a complex by averaging per-residue log-probabilities.
 
-    Loads a structure file, builds the appropriate ProteinMPNN or LigandMPNN
-    batch, and runs ``num_samples`` teacher-forced scoring passes with
-    independent decoding orders. Returns the mean per-residue
-    log-probability at every designed position.
+    Loads a structure file, builds a ProteinMPNN batch, and runs
+    ``num_samples`` teacher-forced scoring passes with independent decoding
+    orders. Returns the mean per-residue log-probability at every designed
+    position.
 
     Args:
-        model: ProteinMPNN or LigandMPNN model.
+        model: ProteinMPNN model.
         structure_path: Path to a PDB or mmCIF file.
         designed_chains: Chain IDs whose residues are scored. Defaults to
             all chains in the structure (i.e., score every residue).
@@ -226,8 +220,7 @@ def score_complex(
         device = next(model.parameters()).device
     model.eval()
 
-    model_type = _model_type(model)
-    features = load_eval_features(structure_path, model_type=model_type)
+    features = load_eval_features(structure_path)
 
     chain_ids: list[str] = features["chain_ids"]
     L = len(chain_ids)
@@ -250,7 +243,6 @@ def score_complex(
         features,
         designed_mask,
         device,
-        model_type=model_type,
         fixed_residue_mask=fixed_mask,
     )
     score_mask = designed_mask.unsqueeze(0).to(device)
@@ -297,7 +289,7 @@ def predict_ddg(
     sample) for variance reduction.
 
     Args:
-        model: ProteinMPNN or LigandMPNN model.
+        model: ProteinMPNN model.
         structure_path: Path to PDB/mmCIF structure file.
         mutations: ``{chain_id: {mutation_str: None}}`` where each
             mutation_str is formatted as ``"A45G"`` or ``"L52aG"``
@@ -320,8 +312,7 @@ def predict_ddg(
         device = next(model.parameters()).device
     model.eval()
 
-    model_type = _model_type(model)
-    features = load_eval_features(structure_path, model_type=model_type)
+    features = load_eval_features(structure_path)
     chain_ids: list[str] = features["chain_ids"]
     residue_numbers: list[int] = features["residue_numbers"]
     residue_icodes: list[str] = features.get("residue_icodes", [""] * len(chain_ids))
@@ -400,42 +391,36 @@ def predict_ddg(
         features,
         full_designed_ab,
         device,
-        model_type=model_type,
         fixed_residue_mask=empty_fixed_ab,
     )
     batch_ab_mut = build_eval_batch(
         mut_features,
         full_designed_ab,
         device,
-        model_type=model_type,
         fixed_residue_mask=empty_fixed_ab,
     )
     batch_a_wt = build_eval_batch(
         chain_a_wt,
         full_designed_a,
         device,
-        model_type=model_type,
         fixed_residue_mask=empty_fixed_a,
     )
     batch_a_mut = build_eval_batch(
         chain_a_mut,
         full_designed_a,
         device,
-        model_type=model_type,
         fixed_residue_mask=empty_fixed_a,
     )
     batch_b_wt = build_eval_batch(
         chain_b_wt,
         full_designed_b,
         device,
-        model_type=model_type,
         fixed_residue_mask=empty_fixed_b,
     )
     batch_b_mut = build_eval_batch(
         chain_b_mut,
         full_designed_b,
         device,
-        model_type=model_type,
         fixed_residue_mask=empty_fixed_b,
     )
 

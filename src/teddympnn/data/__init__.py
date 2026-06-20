@@ -10,7 +10,6 @@ from teddympnn.data.collator import PaddingCollator
 from teddympnn.data.dataset import PPIDataset
 from teddympnn.data.features import (
     derive_backbone,
-    extract_ligand_atoms,
     identify_interface_residues,
     parse_structure,
 )
@@ -22,7 +21,6 @@ __all__ = [
     "PPIDataset",
     "TokenBudgetBatchSampler",
     "derive_backbone",
-    "extract_ligand_atoms",
     "identify_interface_residues",
     "parse_structure",
     "prepare_manifests",

@@ -105,10 +105,7 @@ class ProteinMPNN(nn.Module):
         self,
         input_features: dict[str, torch.Tensor],
     ) -> dict[str, torch.Tensor]:
-        """Compute graph features from input batch.
-
-        Override this in LigandMPNN to pass additional arguments.
-        """
+        """Compute graph features from input batch."""
         return self.graph_featurization_module(  # type: ignore[no-any-return]
             X=input_features["X"],
             residue_mask=input_features["residue_mask"],

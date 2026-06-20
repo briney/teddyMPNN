@@ -1,11 +1,11 @@
 # Default training config: ProteinMPNN fine-tuning on the full data mix
-# (60/20/20 teddymer/nvidia/pdb).
+# (80/20 teddymer/pdb).
 #
 # Architecture, pretrained_weights, and the model-tuned training knobs
 # (token_budget, structure_noise, grad_clip_max_norm) are intentionally unset
 # and resolved from `model_type` at load time. Override anything from the CLI
 # Hydra-style, e.g.:
-#   python -m teddympnn train model_type=ligand_mpnn output_dir=outputs/run2
+#   python -m teddympnn train output_dir=outputs/run2
 
 model_type: protein_mpnn
 
@@ -13,20 +13,14 @@ data:
   train:
     teddymer:
       path: data/manifests/train_teddymer.tsv
-      ratio: 0.60
-    nvidia:
-      path: data/manifests/train_nvidia.tsv
-      ratio: 0.20
+      ratio: 0.80
     pdb:
       path: data/manifests/train_pdb.tsv
       ratio: 0.20
   validation:
     teddymer:
       path: data/manifests/val_teddymer.tsv
-      ratio: 0.60
-    nvidia:
-      path: data/manifests/val_nvidia.tsv
-      ratio: 0.20
+      ratio: 0.80
     pdb:
       path: data/manifests/val_pdb.tsv
       ratio: 0.20
@@ -37,6 +31,7 @@ learning_rate_factor: 2.0
 warmup_steps: 4000
 max_steps: 300000
 label_smoothing: 0.1
+interface_weight: 1.0  # CE weight multiplier for interface residues (>1.0 upweights interface)
 mixed_precision: true
 gradient_checkpointing: true
 num_workers: 8

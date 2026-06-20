@@ -14,7 +14,6 @@ from teddympnn.data.splits import (
     MANIFEST_COLUMNS,
     _hash_split,
     prepare_manifests,
-    split_nvidia_manifest,
     split_pdb_manifest,
     split_teddymer_manifest,
 )
@@ -40,27 +39,6 @@ def teddymer_manifest(tmp_path: Path) -> Path:
             )
     df = pd.DataFrame(rows)
     path = tmp_path / "teddymer_manifest.tsv"
-    df.to_csv(path, sep="\t", index=False)
-    return path
-
-
-@pytest.fixture()
-def nvidia_manifest(tmp_path: Path) -> Path:
-    """Create a synthetic NVIDIA complexes manifest."""
-    rows = []
-    for i in range(50):
-        rows.append(
-            {
-                "model_id": f"AF-{i:04d}",
-                "structure_path": f"/data/nvidia/{i}.cif",
-                "chain_A": "A",
-                "chain_B": "B",
-                "ipSAEmin": 0.8,
-                "pLDDTavg": 80.0,
-            }
-        )
-    df = pd.DataFrame(rows)
-    path = tmp_path / "nvidia_manifest.tsv"
     df.to_csv(path, sep="\t", index=False)
     return path
 
@@ -134,16 +112,6 @@ class TestSplitTeddymer:
         assert 2 <= val_clusters <= 6  # ~20% of 20 clusters
 
 
-class TestSplitNvidia:
-    def test_split_by_complex(self, nvidia_manifest: Path) -> None:
-        """Each complex goes to exactly one split."""
-        train_df, val_df = split_nvidia_manifest(nvidia_manifest)
-        train_ids = set(train_df["model_id"].unique())
-        val_ids = set(val_df["model_id"].unique())
-        assert train_ids.isdisjoint(val_ids)
-        assert len(train_df) + len(val_df) == 50
-
-
 class TestSplitPdb:
     def test_split_by_structure(self, pdb_manifest: Path) -> None:
         """Each structure goes to exactly one split."""
@@ -173,30 +141,28 @@ class TestPrepareManifests:
         self,
         tmp_path: Path,
         teddymer_manifest: Path,
-        nvidia_manifest: Path,
         pdb_manifest: Path,
     ) -> None:
-        """Combines all three sources into unified manifests."""
+        """Combines teddymer and pdb sources into unified manifests."""
         train_path, val_path = prepare_manifests(
             tmp_path / "manifests",
             teddymer_manifest=teddymer_manifest,
-            nvidia_manifest=nvidia_manifest,
             pdb_manifest=pdb_manifest,
         )
 
         train_df = pd.read_csv(train_path, sep="\t")
         val_df = pd.read_csv(val_path, sep="\t")
 
-        # All three sources present in train
-        assert set(train_df["source"].unique()) == {"teddymer", "nvidia", "pdb"}
+        # Both sources present in train
+        assert set(train_df["source"].unique()) == {"teddymer", "pdb"}
 
         # Total row count preserved
-        assert len(train_df) + len(val_df) == 100 + 50 + 40
+        assert len(train_df) + len(val_df) == 100 + 40
 
         # Split stats file written
         stats_path = tmp_path / "manifests" / "split_stats.tsv"
         assert stats_path.exists()
-        for source in ["teddymer", "nvidia", "pdb"]:
+        for source in ["teddymer", "pdb"]:
             assert (tmp_path / "manifests" / f"train_{source}.tsv").exists()
             assert (tmp_path / "manifests" / f"val_{source}.tsv").exists()
 

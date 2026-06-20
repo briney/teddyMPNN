@@ -88,6 +88,5 @@ class TestPretrainedURLs:
         assert "protein_mpnn" in PRETRAINED_URLS
         assert len(PRETRAINED_URLS["protein_mpnn"]) == 4
 
-    def test_ligand_mpnn_urls_exist(self) -> None:
-        assert "ligand_mpnn" in PRETRAINED_URLS
-        assert len(PRETRAINED_URLS["ligand_mpnn"]) == 4
+    def test_protein_mpnn_only(self) -> None:
+        assert list(PRETRAINED_URLS.keys()) == ["protein_mpnn"]

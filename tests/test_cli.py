@@ -35,11 +35,6 @@ class TestCLIHelp:
         result = runner.invoke(app, ["download", "teddymer", "--help"])
         assert result.exit_code == 0
 
-    def test_download_nvidia_help(self) -> None:
-        """download nvidia-complexes --help works."""
-        result = runner.invoke(app, ["download", "nvidia-complexes", "--help"])
-        assert result.exit_code == 0
-
     def test_download_prepare_manifests_help(self) -> None:
         """download prepare-manifests --help works."""
         result = runner.invoke(app, ["download", "prepare-manifests", "--help"])
@@ -57,16 +52,6 @@ class TestCLIHelp:
         assert result.exit_code == 0
         assert "config" in result.output.lower()
 
-    def test_checkpoints_help(self) -> None:
-        """checkpoints --help works."""
-        result = runner.invoke(app, ["checkpoints", "--help"])
-        assert result.exit_code == 0
-
-    def test_checkpoints_export_foundry_help(self) -> None:
-        """checkpoints export-foundry --help works."""
-        result = runner.invoke(app, ["checkpoints", "export-foundry", "--help"])
-        assert result.exit_code == 0
-
     def test_evaluate_help(self) -> None:
         """evaluate --help works."""
         result = runner.invoke(app, ["evaluate", "--help"])
@@ -76,12 +61,6 @@ class TestCLIHelp:
         """evaluate recovery --help works."""
         result = runner.invoke(app, ["evaluate", "recovery", "--help"])
         assert result.exit_code == 0
-
-    def test_evaluate_benchmark_help(self) -> None:
-        """evaluate benchmark --help works."""
-        result = runner.invoke(app, ["evaluate", "benchmark", "--help"])
-        assert result.exit_code == 0
-        assert "config" in result.output.lower()
 
     def test_evaluate_ddg_help(self) -> None:
         """evaluate ddg --help works."""

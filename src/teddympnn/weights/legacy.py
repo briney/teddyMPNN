@@ -1,8 +1,8 @@
-"""Legacy ↔ current weight conversion for dauparas/ProteinMPNN and dauparas/LigandMPNN.
+"""Legacy weight loading for dauparas/ProteinMPNN.
 
 Legacy checkpoints use different module names, token ordering, and RBF pair
 ordering. This module handles all the transformations needed to load legacy
-weights into our model and export our weights back to legacy format.
+weights into our model.
 """
 
 from __future__ import annotations
@@ -16,8 +16,6 @@ import torch
 from torch import nn
 
 from teddympnn.models.tokens import (
-    current_to_legacy_rbf_permutation,
-    current_to_legacy_token_permutation,
     expand_pair_permutation,
     legacy_to_current_rbf_permutation,
     legacy_to_current_token_permutation,
@@ -40,39 +38,12 @@ _LEGACY_TO_CURRENT_KEY_MAP: list[tuple[str, str]] = [
     ),
     ("features.edge_embedding", "graph_featurization_module.edge_embedding"),
     ("features.norm_edges", "graph_featurization_module.edge_norm"),
-    # LigandMPNN-specific graph featurization
-    ("features.node_project_down", "graph_featurization_module.node_embedding"),
-    ("features.norm_nodes", "graph_featurization_module.node_norm"),
-    ("features.type_linear", "graph_featurization_module.embed_atom_type_features"),
-    ("features.y_nodes", "graph_featurization_module.ligand_subgraph_node_embedding"),
-    ("features.y_edges", "graph_featurization_module.ligand_subgraph_edge_embedding"),
-    ("features.norm_y_nodes", "graph_featurization_module.ligand_subgraph_node_norm"),
-    ("features.norm_y_edges", "graph_featurization_module.ligand_subgraph_edge_norm"),
-    # LigandMPNN context encoder
-    ("W_v", "W_protein_to_ligand_edges_embed"),
-    ("W_c", "W_protein_encoding_embed"),
-    ("W_nodes_y", "W_ligand_nodes_embed"),
-    ("W_edges_y", "W_ligand_edges_embed"),
-    ("V_C_norm", "final_context_norm"),
-    ("V_C", "W_final_context_embed"),
-    ("context_encoder_layers", "protein_ligand_context_encoder_layers"),
-    ("y_context_encoder_layers", "ligand_context_encoder_layers"),
-]
-
-# Reverse map for export
-_CURRENT_TO_LEGACY_KEY_MAP: list[tuple[str, str]] = [
-    (current, legacy) for legacy, current in _LEGACY_TO_CURRENT_KEY_MAP
 ]
 
 # Legacy parameter suffixes differ from PyTorch convention
 _LEGACY_SUFFIX_MAP: dict[str, str] = {
     ".w": ".weight",
     ".b": ".bias",
-}
-
-_CURRENT_SUFFIX_MAP: dict[str, str] = {
-    ".weight": ".w",
-    ".bias": ".b",
 }
 
 
@@ -90,25 +61,6 @@ def _rename_key_legacy_to_current(key: str) -> str:
     ):
         if key.startswith(legacy_prefix):
             return current_prefix + key[len(legacy_prefix) :]
-
-    return key
-
-
-def _rename_key_current_to_legacy(key: str) -> str:
-    """Rename a single current key to legacy naming."""
-    # Apply prefix mapping (first match, reversed order for longest-match priority)
-    for current_prefix, legacy_prefix in sorted(
-        _CURRENT_TO_LEGACY_KEY_MAP, key=lambda x: -len(x[0])
-    ):
-        if key.startswith(current_prefix):
-            key = legacy_prefix + key[len(current_prefix) :]
-            break
-
-    # Apply suffix mapping
-    for current_suffix, legacy_suffix in _CURRENT_SUFFIX_MAP.items():
-        if key.endswith(current_suffix):
-            key = key[: -len(current_suffix)] + legacy_suffix
-            break
 
     return key
 
@@ -169,54 +121,16 @@ def _drop_120th_atom_type(
 ) -> None:
     """Drop the 120th atom type (legacy has 120, current has 119).
 
-    Affects LigandMPNN embedding weights that have atom type as input dim.
+    Affects embedding weights that have atom type as input dim.
     """
-    keys_to_check = [
-        "graph_featurization_module.embed_atom_type_features.weight",
-        "graph_featurization_module.embed_atom_type_features.bias",
-        "graph_featurization_module.ligand_subgraph_node_embedding.weight",
-    ]
-    for key in keys_to_check:
-        if key not in state_dict:
-            continue
+    key = "graph_featurization_module.embed_atom_type_features.weight"
+    if key in state_dict:
         tensor = state_dict[key]
-        # The atom type one-hot occupies the first 120 positions in the input dim
-        # We need to drop index 119 (the 120th type, 0-indexed)
-        if key.endswith(".bias"):
-            continue  # Bias is output-dim, not affected
-        if "embed_atom_type_features" in key and key.endswith(".weight"):
-            # Linear weight: (out_features, in_features)
-            # Input is [120 element + 19 group + 8 period] = 147
-            # → [119 element + 19 group + 8 period] = 146
-            if tensor.shape[1] == 147:
-                state_dict[key] = torch.cat([tensor[:, :119], tensor[:, 120:]], dim=1)
-        elif "ligand_subgraph_node_embedding" in key and tensor.shape[1] == 147:
+        # Linear weight: (out_features, in_features)
+        # Input is [120 element + 19 group + 8 period] = 147
+        # → [119 element + 19 group + 8 period] = 146
+        if tensor.shape[1] == 147:
             state_dict[key] = torch.cat([tensor[:, :119], tensor[:, 120:]], dim=1)
-
-
-def _restore_120th_atom_type(
-    state_dict: OrderedDict[str, torch.Tensor],
-) -> None:
-    """Inverse of :func:`_drop_120th_atom_type`.
-
-    Re-inserts a zero column at index 119 in the input dimension of the
-    atom-type-embedding weights so the resulting shape matches the legacy
-    120-atom-type vocabulary expected by dauparas/LigandMPNN.
-    """
-    keys_to_check = [
-        "graph_featurization_module.embed_atom_type_features.weight",
-        "graph_featurization_module.ligand_subgraph_node_embedding.weight",
-    ]
-    for key in keys_to_check:
-        if key not in state_dict:
-            continue
-        tensor = state_dict[key]
-        # Current input is [119 element + 19 group + 8 period] = 146.
-        # Legacy input is [120 element + 19 group + 8 period] = 147.
-        if tensor.shape[1] != 146:
-            continue
-        zero_col = torch.zeros(tensor.shape[0], 1, dtype=tensor.dtype, device=tensor.device)
-        state_dict[key] = torch.cat([tensor[:, :119], zero_col, tensor[:, 119:]], dim=1)
 
 
 def load_legacy_weights(
@@ -230,7 +144,7 @@ def load_legacy_weights(
     1. Rename keys (features.* → graph_featurization_module.*, etc.)
     2. Reorder token embeddings in W_s and W_out
     3. Reorder RBF atom pairs in edge_embedding
-    4. Drop 120th atom type (LigandMPNN only)
+    4. Drop 120th atom type (legacy format only)
     5. Copy registered buffers from model (not checkpoint)
 
     Args:
@@ -278,40 +192,3 @@ def load_legacy_weights(
 
     logger.info("Loaded legacy checkpoint from %s", path)
     return dict(checkpoint)
-
-
-def convert_to_legacy(state_dict: dict[str, torch.Tensor]) -> OrderedDict[str, torch.Tensor]:
-    """Convert current state_dict to legacy format for export.
-
-    Applies reverse transformations:
-    1. Reorder tokens back to 1-letter alphabetical.
-    2. Reorder RBF pairs back to same-atom-first.
-    3. Restore the 120th atom-type slot (LigandMPNN only).
-    4. Rename keys to legacy naming.
-
-    Args:
-        state_dict: Current-format state_dict.
-
-    Returns:
-        Legacy-format state_dict.
-    """
-    legacy = OrderedDict(state_dict)
-
-    # Reverse token ordering
-    token_perm = current_to_legacy_token_permutation()
-    _reorder_token_weights(legacy, token_perm)
-
-    # Reverse RBF ordering
-    rbf_perm = current_to_legacy_rbf_permutation()
-    _reorder_rbf_weights(legacy, rbf_perm)
-
-    # Restore dropped 120th atom type for LigandMPNN exports.
-    _restore_120th_atom_type(legacy)
-
-    # Rename keys
-    final = OrderedDict()
-    for key, value in legacy.items():
-        new_key = _rename_key_current_to_legacy(key)
-        final[new_key] = value
-
-    return final

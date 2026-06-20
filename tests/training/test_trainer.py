@@ -27,6 +27,7 @@ def _make_batch(B: int = 2, L: int = 20, device: str = "cpu") -> dict[str, torch
         "residue_mask": torch.ones(B, L, device=device),
         "designed_residue_mask": torch.ones(B, L, device=device),
         "fixed_residue_mask": torch.zeros(B, L, device=device),
+        "interface_residue_mask": torch.zeros(B, L, dtype=torch.bool, device=device),
     }
 
 

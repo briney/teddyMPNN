@@ -1,8 +1,7 @@
-"""Foundry-format checkpoint loading and export.
+"""Foundry-format checkpoint loading.
 
 Foundry's "current" format stores checkpoints with the same module hierarchy
-we use, so loading is direct. Exporting produces a checkpoint that Foundry
-users can load via ``model.load_state_dict(checkpoint["model"])``.
+we use, so loading is direct.
 """
 
 from __future__ import annotations
@@ -49,31 +48,3 @@ def load_foundry_checkpoint(
 
     logger.info("Loaded Foundry checkpoint from %s", path)
     return dict(checkpoint)
-
-
-def export_foundry_checkpoint(
-    path: str | Path,
-    model: nn.Module,
-    config: dict[str, Any] | None = None,
-) -> None:
-    """Export a Foundry-compatible checkpoint from a teddyMPNN model.
-
-    Writes a checkpoint that Foundry users can load directly:
-    ``model.load_state_dict(torch.load(path)["model"])``.
-
-    Args:
-        path: Output file path.
-        model: Model whose state_dict to export.
-        config: Optional config metadata.
-    """
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-
-    checkpoint: dict[str, Any] = {
-        "model": model.state_dict(),
-    }
-    if config is not None:
-        checkpoint["config"] = config
-
-    torch.save(checkpoint, path)
-    logger.info("Exported Foundry checkpoint to %s", path)

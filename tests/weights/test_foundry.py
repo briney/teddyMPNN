@@ -1,51 +1,48 @@
-"""Tests for Foundry checkpoint loading and export."""
+"""Tests for Foundry checkpoint loading."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import torch
-
 if TYPE_CHECKING:
     from pathlib import Path
 
+import torch
+
 from teddympnn.models.protein_mpnn import ProteinMPNN
-from teddympnn.weights.foundry import export_foundry_checkpoint, load_foundry_checkpoint
+from teddympnn.weights.foundry import load_foundry_checkpoint
 
 
-class TestFoundryRoundtrip:
-    def test_export_and_reload(self, tmp_path: Path) -> None:
-        """Export → reload produces identical state_dict."""
+class TestFoundryLoad:
+    def test_load_from_model_key(self, tmp_path: Path) -> None:
+        """load_foundry_checkpoint reads weights from the 'model' key."""
         model = ProteinMPNN(
             hidden_dim=32, num_neighbors=5, num_encoder_layers=1, num_decoder_layers=1
         )
-        export_path = tmp_path / "foundry.pt"
-        export_foundry_checkpoint(export_path, model)
+        ckpt_path = tmp_path / "foundry.pt"
+        torch.save({"model": model.state_dict()}, ckpt_path)
 
         model2 = ProteinMPNN(
             hidden_dim=32, num_neighbors=5, num_encoder_layers=1, num_decoder_layers=1
         )
-        load_foundry_checkpoint(export_path, model2)
+        load_foundry_checkpoint(ckpt_path, model2)
 
         for key in model.state_dict():
             assert torch.equal(model.state_dict()[key], model2.state_dict()[key]), (
                 f"Mismatch for key: {key}"
             )
 
-    def test_checkpoint_has_model_key(self, tmp_path: Path) -> None:
+    def test_returns_checkpoint_dict(self, tmp_path: Path) -> None:
+        """load_foundry_checkpoint returns the full checkpoint dict."""
         model = ProteinMPNN(
             hidden_dim=32, num_neighbors=5, num_encoder_layers=1, num_decoder_layers=1
         )
-        path = tmp_path / "foundry.pt"
-        export_foundry_checkpoint(path, model)
-        ckpt = torch.load(path, weights_only=True)
-        assert "model" in ckpt
+        ckpt_path = tmp_path / "foundry.pt"
+        torch.save({"model": model.state_dict(), "extra": "metadata"}, ckpt_path)
 
-    def test_config_included(self, tmp_path: Path) -> None:
-        model = ProteinMPNN(
+        model2 = ProteinMPNN(
             hidden_dim=32, num_neighbors=5, num_encoder_layers=1, num_decoder_layers=1
         )
-        path = tmp_path / "foundry.pt"
-        export_foundry_checkpoint(path, model, config={"test": True})
-        ckpt = torch.load(path, weights_only=True)
-        assert ckpt["config"]["test"] is True
+        result = load_foundry_checkpoint(ckpt_path, model2)
+        assert "model" in result
+        assert result["extra"] == "metadata"

@@ -1,7 +1,7 @@
 """Train/validation manifest splitting for PPI datasets.
 
 Creates reproducible train/val splits respecting data source structure:
-teddymer splits by cluster, NVIDIA by complex, PDB by structure.
+teddymer splits by cluster, PDB by structure.
 Produces unified manifests that the training pipeline can consume directly.
 """
 
@@ -110,55 +110,6 @@ def split_teddymer_manifest(
     return train_df, val_df
 
 
-def split_nvidia_manifest(
-    manifest_path: str | Path,
-    *,
-    val_fraction: float = 0.05,
-    seed: int = 42,
-    complex_column: str = "model_id",
-) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Split NVIDIA complexes manifest by complex identifier.
-
-    Args:
-        manifest_path: Path to filtered NVIDIA manifest TSV.
-        val_fraction: Fraction of complexes assigned to validation.
-        seed: Random seed for deterministic splitting.
-        complex_column: Column containing complex identifiers.
-
-    Returns:
-        Tuple of (train_df, val_df).
-    """
-    df = pd.read_csv(manifest_path, sep="\t")
-    df.columns = df.columns.str.strip()
-
-    col = complex_column
-    if col not in df.columns:
-        candidates = [c for c in df.columns if "model" in c.lower() or "id" in c.lower()]
-        if candidates:
-            col = candidates[0]
-            logger.info("Using complex column: %s", col)
-        else:
-            msg = f"No complex ID column found in {manifest_path}. Columns: {list(df.columns)}"
-            raise ValueError(msg)
-
-    unique_ids = df[col].unique()
-    val_ids = {c for c in unique_ids if _hash_split(str(c), val_fraction, seed)}
-
-    is_val = df[col].isin(val_ids)
-    train_df = df[~is_val].copy()
-    val_df = df[is_val].copy()
-
-    logger.info(
-        "NVIDIA split: %d complexes → %d train (%d rows), %d val (%d rows)",
-        len(unique_ids),
-        len(unique_ids) - len(val_ids),
-        len(train_df),
-        len(val_ids),
-        len(val_df),
-    )
-    return train_df, val_df
-
-
 def split_pdb_manifest(
     manifest_path: str | Path,
     *,
@@ -228,7 +179,7 @@ def _normalize_to_training_manifest(
 
     Args:
         df: Source-specific DataFrame.
-        source_name: Name of the data source (teddymer, nvidia, pdb).
+        source_name: Name of the data source (teddymer, pdb).
         structure_path_column: Column containing structure file paths.
         chain_a_column: Column containing chain A IDs.
         chain_b_column: Column containing chain B IDs.
@@ -301,7 +252,6 @@ def prepare_manifests(
     output_dir: str | Path,
     *,
     teddymer_manifest: str | Path | None = None,
-    nvidia_manifest: str | Path | None = None,
     pdb_manifest: str | Path | None = None,
     val_fraction: float = 0.05,
     seed: int = 42,
@@ -315,7 +265,6 @@ def prepare_manifests(
     Args:
         output_dir: Directory to write output manifests.
         teddymer_manifest: Path to filtered teddymer manifest TSV.
-        nvidia_manifest: Path to filtered NVIDIA complexes manifest TSV.
         pdb_manifest: Path to PDB complexes manifest TSV.
         val_fraction: Fraction reserved for validation (default 5%).
         seed: Random seed for reproducible splits.
@@ -344,22 +293,6 @@ def prepare_manifests(
         val_norm.to_csv(val_source_path, sep="\t", index=False)
         source_paths.append(
             ("teddymer", train_source_path, val_source_path, len(train_norm), len(val_norm))
-        )
-
-    if nvidia_manifest is not None:
-        train_df, val_df = split_nvidia_manifest(
-            nvidia_manifest, val_fraction=val_fraction, seed=seed
-        )
-        train_norm = _normalize_to_training_manifest(train_df, "nvidia")
-        val_norm = _normalize_to_training_manifest(val_df, "nvidia")
-        train_parts.append(train_norm)
-        val_parts.append(val_norm)
-        train_source_path = output_dir / "train_nvidia.tsv"
-        val_source_path = output_dir / "val_nvidia.tsv"
-        train_norm.to_csv(train_source_path, sep="\t", index=False)
-        val_norm.to_csv(val_source_path, sep="\t", index=False)
-        source_paths.append(
-            ("nvidia", train_source_path, val_source_path, len(train_norm), len(val_norm))
         )
 
     if pdb_manifest is not None:

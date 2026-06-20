@@ -11,7 +11,6 @@ from teddympnn.data.features import (
     _compute_cb,
     _resolve_resname,
     derive_backbone,
-    extract_ligand_atoms,
     identify_interface_residues,
     parse_structure,
 )
@@ -22,8 +21,6 @@ from teddympnn.models.tokens import BACKBONE_ATOM_INDICES, NUM_ATOMS_37
 REFERENCE_DIR = Path(__file__).parent.parent / "validation" / "reference_data" / "structures"
 PDB_1BRS = REFERENCE_DIR / "1BRS_mini.pdb"
 CIF_1BRS = REFERENCE_DIR / "1BRS_mini.cif"
-PDB_4GYT = REFERENCE_DIR / "4GYT_mini.pdb"
-CIF_4GYT = REFERENCE_DIR / "4GYT_mini.cif"
 
 
 @pytest.fixture
@@ -206,45 +203,6 @@ class TestDeriveBackbone:
         X, X_m = derive_backbone(xyz_37, xyz_37_m)
         assert X.shape == (B, L, 4, 3)
         assert X_m.shape == (B, L, 4)
-
-
-# ---------------------------------------------------------------------------
-# Extract ligand atoms
-# ---------------------------------------------------------------------------
-
-
-class TestExtractLigandAtoms:
-    @pytest.fixture(autouse=True)
-    def _skip_if_missing(self, requires_reference_structures):
-        pass
-
-    def test_returns_expected_keys(self):
-        result = extract_ligand_atoms(PDB_4GYT)
-        assert "Y" in result
-        assert "Y_m" in result
-        assert "Y_t" in result
-
-    def test_tensor_shapes_consistent(self):
-        result = extract_ligand_atoms(PDB_4GYT)
-        N = result["Y"].shape[0]
-        assert result["Y"].shape == (N, 3)
-        assert result["Y_m"].shape == (N,)
-        assert result["Y_t"].shape == (N,)
-
-    def test_element_types_valid(self):
-        result = extract_ligand_atoms(PDB_4GYT)
-        if result["Y_t"].numel() > 0:
-            assert (result["Y_t"] >= 0).all()
-            assert (result["Y_t"] < 119).all()
-
-    def test_empty_for_protein_only(self):
-        """1BRS has no ligands — should return empty tensors."""
-        result = extract_ligand_atoms(PDB_1BRS)
-        # 1BRS may have some buffer ions, but all ligand tensors should be consistent
-        N = result["Y"].shape[0]
-        assert result["Y"].shape == (N, 3)
-        assert result["Y_m"].shape == (N,)
-        assert result["Y_t"].shape == (N,)
 
 
 # ---------------------------------------------------------------------------

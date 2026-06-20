@@ -64,9 +64,6 @@ class TestPPIDataset:
             "residue_mask",
             "designed_residue_mask",
             "fixed_residue_mask",
-            "Y",
-            "Y_m",
-            "Y_t",
             "num_residues",
         }
         assert expected_keys <= set(item.keys())
@@ -151,15 +148,6 @@ class TestPPIDataset:
         for key in ["S", "R_idx", "chain_labels"]:
             torch.testing.assert_close(item1[key], item2[key])
 
-    def test_empty_ligand_context(self, manifest_with_1brs: Path):
-        """Without include_ligand_atoms, Y should be empty."""
-        ds = PPIDataset(manifest_with_1brs, include_ligand_atoms=False)
-        item = ds[0]
-
-        assert item["Y"].shape[0] == 0
-        assert item["Y_m"].shape[0] == 0
-        assert item["Y_t"].shape[0] == 0
-
     def test_lengths_property(self, manifest_with_1brs: Path):
         """lengths should match the number of views."""
         ds = PPIDataset(manifest_with_1brs)
@@ -179,16 +167,16 @@ class TestPerSourceManifestContract:
         manifest_path = tmp_path / "manifest_per_source.tsv"
         df = pd.DataFrame(
             {
-                "structure_path": [str(PDB_1BRS), str(PDB_1BRS), str(PDB_1BRS)],
-                "chain_A": ["A", "A", "A"],
-                "chain_B": ["D", "D", "D"],
-                "source": ["teddymer", "nvidia", "pdb"],
+                "structure_path": [str(PDB_1BRS), str(PDB_1BRS)],
+                "chain_A": ["A", "A"],
+                "chain_B": ["D", "D"],
+                "source": ["teddymer", "pdb"],
             }
         )
         df.to_csv(manifest_path, sep="\t", index=False)
         return manifest_path
 
-    @pytest.mark.parametrize("source", ["teddymer", "nvidia", "pdb"])
+    @pytest.mark.parametrize("source", ["teddymer", "pdb"])
     def test_first_item_has_nonempty_partner_masks(
         self,
         per_source_manifest: Path,
@@ -316,6 +304,15 @@ class TestMixedDataLoaderWeighting:
         sampler = loader._loaders[0].batch_sampler
         assert sampler is not None
         assert sampler._epoch == 42  # type: ignore[attr-defined]
+
+
+def test_getitem_includes_interface_mask(manifest_with_1brs: Path) -> None:
+    """Each sample from PPIDataset must include a bool interface_residue_mask."""
+    ds = PPIDataset(manifest_with_1brs)
+    sample = ds[0]
+    mask = sample["interface_residue_mask"]
+    assert mask.dtype == torch.bool
+    assert mask.shape == sample["S"].shape
 
 
 class TestMinInterfaceContactsFilter:

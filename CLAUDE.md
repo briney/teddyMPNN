@@ -46,7 +46,11 @@ tests/             # Test suite (mirrors src structure)
 
 ## Architecture
 
-<!-- Update this section as the project develops. Describe the main components,
-     how data flows, and any non-obvious design decisions. -->
-
-TODO: Fill in as the project takes shape.
+teddyMPNN fine-tunes the bundled `proteinmpnn_v_48_020` base weights on the
+teddymer synthetic dimer dataset using an interface-weighted cross-entropy loss.
+The model itself is unchanged (3+3 message-passing layers, 128-dim hidden, k=48,
+~1.66M params); the fine-tune sharpens interface residue predictions via a
+single `interface_weight` config knob (default 1.0 = standard CE). Evaluation
+covers interface sequence recovery (held-out teddymer split + PDB experimental
+complexes) and ddG correlation on SKEMPI v2.0. See `docs/VISION.md` for scope
+and `docs/ARCHITECTURE.md` for implementation details.

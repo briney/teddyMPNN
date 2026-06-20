@@ -1,13 +1,14 @@
 #!/usr/bin/env python
 """Generate Foundry reference tensors for equivalence testing.
 
-Runs inside the brineylab/ligandmpnn Docker container. Uses Foundry's own
-forward() method to produce canonical reference outputs for comparison.
+Runs inside a Docker container with Foundry (brineylab/foundry) installed.
+Uses Foundry's own forward() method to produce canonical ProteinMPNN reference
+outputs for comparison against teddyMPNN.
 
 Usage (from repo root):
     docker run --rm --gpus all \
         -v $PWD/tests/validation/reference_data:/data \
-        --entrypoint python3 brineylab/ligandmpnn:latest \
+        --entrypoint python3 <foundry-image> \
         /data/generate_foundry_reference.py
 """
 
@@ -16,7 +17,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import torch
-from mpnn.model.mpnn import LigandMPNN as FoundryLigandMPNN
 from mpnn.model.mpnn import ProteinMPNN as FoundryProteinMPNN
 from mpnn.utils.weights import load_legacy_weights
 
@@ -31,7 +31,6 @@ def _build_network_input(
     seed: int,
     device: str,
     L2: int | None = None,
-    N_ligand: int = 0,
 ) -> dict:
     """Build a ``network_input`` dict suitable for Foundry's forward().
 
@@ -41,7 +40,6 @@ def _build_network_input(
         seed: Random seed for reproducibility.
         device: Torch device string.
         L2: Optional second-chain length (two-chain complex).
-        N_ligand: Number of ligand atoms (0 for ProteinMPNN).
     """
     total_L = L + (L2 or 0)
     gen = torch.Generator(device=device).manual_seed(seed)
@@ -67,36 +65,29 @@ def _build_network_input(
         R_idx = torch.arange(total_L, device=device).unsqueeze(0).expand(B, -1)
         designed = torch.ones(B, total_L, dtype=torch.bool, device=device)
 
-    input_features = {
-        "X": torch.randn(B, total_L, 37, 3, generator=gen, device=device),
-        "X_m": torch.ones(B, total_L, 37, dtype=torch.bool, device=device),
-        "S": torch.randint(0, 21, (B, total_L), generator=gen, device=device),
-        "R_idx": R_idx,
-        "chain_labels": chain,
-        "residue_mask": torch.ones(B, total_L, dtype=torch.bool, device=device),
-        "designed_residue_mask": designed,
-        "structure_noise": 0.0,
-        "decode_type": "teacher_forcing",
-        "causality_pattern": "auto_regressive",
-        "initialize_sequence_embedding_with_ground_truth": True,
-        # Defaults required by Foundry's forward()
-        "temperature": None,
-        "bias": None,
-        "pair_bias": None,
-        "symmetry_equivalence_group": None,
-        "symmetry_weight": None,
-        "repeat_sample_num": None,
-        "features_to_return": None,
+    return {
+        "input_features": {
+            "X": torch.randn(B, total_L, 37, 3, generator=gen, device=device),
+            "X_m": torch.ones(B, total_L, 37, dtype=torch.bool, device=device),
+            "S": torch.randint(0, 21, (B, total_L), generator=gen, device=device),
+            "R_idx": R_idx,
+            "chain_labels": chain,
+            "residue_mask": torch.ones(B, total_L, dtype=torch.bool, device=device),
+            "designed_residue_mask": designed,
+            "structure_noise": 0.0,
+            "decode_type": "teacher_forcing",
+            "causality_pattern": "auto_regressive",
+            "initialize_sequence_embedding_with_ground_truth": True,
+            # Defaults required by Foundry's forward()
+            "temperature": None,
+            "bias": None,
+            "pair_bias": None,
+            "symmetry_equivalence_group": None,
+            "symmetry_weight": None,
+            "repeat_sample_num": None,
+            "features_to_return": None,
+        }
     }
-
-    if N_ligand > 0:
-        gen2 = torch.Generator(device=device).manual_seed(seed + 1000)
-        input_features["Y"] = torch.randn(B, N_ligand, 3, generator=gen2, device=device)
-        input_features["Y_m"] = torch.ones(B, N_ligand, dtype=torch.bool, device=device)
-        input_features["Y_t"] = torch.randint(0, 119, (B, N_ligand), generator=gen2, device=device)
-        input_features["atomize_side_chains"] = False
-
-    return {"input_features": input_features}
 
 
 def _to_cpu(d: dict) -> dict:
@@ -165,31 +156,6 @@ def main() -> None:
         generate_reference("proteinmpnn", model, cases, device)
     else:
         print(f"SKIP ProteinMPNN: {pmpnn_weights} not found")
-
-    # --- LigandMPNN ---
-    lmpnn_weights = WEIGHTS_DIR / "ligandmpnn_v_32_010_25.pt"
-    if lmpnn_weights.exists():
-        print("\n=== LigandMPNN ===")
-        model = FoundryLigandMPNN()
-        load_legacy_weights(model, str(lmpnn_weights))
-        model = model.to(device).eval()
-
-        no_ctx_input = _build_network_input(1, 40, seed=2024, device=device, N_ligand=8)
-        # Mask every ligand atom so the context branch has nothing to attend to.
-        no_ctx_input["input_features"]["Y_m"] = torch.zeros_like(
-            no_ctx_input["input_features"]["Y_m"]
-        )
-
-        cases = {
-            "with_ligand": _build_network_input(1, 40, seed=789, device=device, N_ligand=10),
-            "two_chain_with_ligand": _build_network_input(
-                1, 30, seed=321, device=device, L2=20, N_ligand=12
-            ),
-            "no_context": no_ctx_input,
-        }
-        generate_reference("ligandmpnn", model, cases, device)
-    else:
-        print(f"SKIP LigandMPNN: {lmpnn_weights} not found")
 
     print("\nDone!")
 

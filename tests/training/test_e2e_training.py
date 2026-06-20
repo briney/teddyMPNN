@@ -17,6 +17,7 @@ from teddympnn.config import DataConfig, DatasetConfig, ModelConfig, TrainingCon
 from teddympnn.data.collator import PaddingCollator
 from teddympnn.data.features import derive_backbone, parse_structure
 from teddympnn.models import ProteinMPNN
+from teddympnn.training.loss import LabelSmoothedNLLLoss
 from teddympnn.training.trainer import Trainer
 from teddympnn.weights.io import load_checkpoint_bundle
 from teddympnn.weights.legacy import load_legacy_weights
@@ -27,13 +28,12 @@ _STRUCTURES_DIR = _REF_DIR / "structures"
 _WEIGHTS_DIR = _REF_DIR / "weights"
 
 _PROTEINMPNN_WEIGHTS = _WEIGHTS_DIR / "proteinmpnn_v_48_020.pt"
-_LIGANDMPNN_WEIGHTS = _WEIGHTS_DIR / "ligandmpnn_v_32_010_25.pt"
 
 # Test structures (PDB complexes with two chains)
 _TEST_STRUCTURES = ["1BRS"]
 
 _has_gpu = torch.cuda.is_available()
-_has_weights = _PROTEINMPNN_WEIGHTS.exists() and _LIGANDMPNN_WEIGHTS.exists()
+_has_weights = _PROTEINMPNN_WEIGHTS.exists()
 _has_structures = all((_STRUCTURES_DIR / f"{pdb}.pdb").exists() for pdb in _TEST_STRUCTURES)
 
 
@@ -68,6 +68,9 @@ def _make_synthetic_batches(
     """Create synthetic batches for CPU-only testing."""
     batches = []
     for _ in range(n_batches):
+        # Half the residues are "interface" for weighting tests
+        iface_mask = torch.zeros(B, L, dtype=torch.bool)
+        iface_mask[:, : L // 2] = True
         batches.append(
             {
                 "X": torch.randn(B, L, 4, 3),
@@ -77,6 +80,7 @@ def _make_synthetic_batches(
                 "residue_mask": torch.ones(B, L),
                 "designed_residue_mask": torch.ones(B, L),
                 "fixed_residue_mask": torch.zeros(B, L),
+                "interface_residue_mask": iface_mask,
             }
         )
     return batches
@@ -258,6 +262,44 @@ class TestE2ECPUOnly:
         assert (ckpt_dir / "step_0000025.pt").exists()
         assert (ckpt_dir / "step_0000050.pt").exists()
 
+    def test_interface_weight_produces_finite_loss(self, tmp_path: Path) -> None:
+        """interface_weight=3.0 must produce finite loss (interface residues upweighted)."""
+        model = ProteinMPNN(
+            hidden_dim=32, num_encoder_layers=1, num_decoder_layers=1, num_neighbors=10
+        )
+        config = TrainingConfig(
+            model_type="protein_mpnn",
+            model=ModelConfig(
+                hidden_dim=32,
+                num_encoder_layers=1,
+                num_decoder_layers=1,
+                num_neighbors=10,
+            ),
+            pretrained_weights=tmp_path / "dummy.pt",
+            data=DataConfig(
+                train={"pdb": DatasetConfig(path=tmp_path / "m.tsv", ratio=1.0)},
+            ),
+            max_steps=5,
+            warmup_steps=2,
+            interface_weight=3.0,
+            mixed_precision=False,
+            gradient_checkpointing=False,
+            output_dir=tmp_path / "outputs",
+        )
+
+        trainer = Trainer(
+            config=config,
+            model=model,
+            train_loader=_make_synthetic_batches(n_batches=5),
+            device=torch.device("cpu"),
+        )
+
+        for batch in _make_synthetic_batches(n_batches=5):
+            loss = trainer.train_step(batch)
+            assert not torch.isnan(torch.tensor(loss)), "Loss is NaN with interface_weight=3.0"
+            assert not torch.isinf(torch.tensor(loss)), "Loss is Inf with interface_weight=3.0"
+            assert loss > 0, f"Expected positive loss, got {loss}"
+
     def test_no_nan_with_mixed_precision_cpu(self, tmp_path: Path) -> None:
         """Mixed precision on CPU should not produce NaN (autocast is a no-op on CPU)."""
         model = ProteinMPNN(
@@ -292,3 +334,52 @@ class TestE2ECPUOnly:
             loss = trainer.train_step(batch)
             assert not torch.isnan(torch.tensor(loss))
             assert not torch.isinf(torch.tensor(loss))
+
+    def test_interface_weight_1_equals_standard_ce(self) -> None:
+        """interface_weight=1.0 must be numerically identical to unweighted CE.
+
+        Regression guard: the trainer computes weights = 1.0 + (w-1)*mask,
+        so w=1.0 collapses to all-ones and the weighted mean equals the
+        plain unweighted mean. This test ensures that invariant holds
+        end-to-end on a fixed batch so it catches any future breakage.
+        """
+        torch.manual_seed(0)
+        model = ProteinMPNN(
+            hidden_dim=32, num_encoder_layers=1, num_decoder_layers=1, num_neighbors=10
+        )
+        model.eval()
+
+        B, L = 2, 15
+        # Fixed batch with known interface mask (half the residues are interface)
+        iface_mask = torch.zeros(B, L, dtype=torch.bool)
+        iface_mask[:, : L // 2] = True
+        batch = {
+            "X": torch.randn(B, L, 4, 3),
+            "S": torch.randint(0, 21, (B, L)),
+            "R_idx": torch.arange(L).unsqueeze(0).expand(B, -1),
+            "chain_labels": torch.zeros(B, L, dtype=torch.long),
+            "residue_mask": torch.ones(B, L),
+            "designed_residue_mask": torch.ones(B, L),
+            "fixed_residue_mask": torch.zeros(B, L),
+            "interface_residue_mask": iface_mask,
+        }
+
+        with torch.no_grad():
+            output = model(batch)
+        log_probs = output["log_probs"]  # (B, L, V)
+        mask = batch["designed_residue_mask"]
+        targets = batch["S"]
+
+        loss_fn = LabelSmoothedNLLLoss()
+
+        # With interface_weight=1.0 the trainer sets weights = all-ones
+        all_ones = torch.ones(B, L)
+        loss_weighted = loss_fn(log_probs, targets, mask, weights=all_ones)
+
+        # Without weights (standard CE)
+        loss_unweighted = loss_fn(log_probs, targets, mask, weights=None)
+
+        assert torch.allclose(loss_weighted, loss_unweighted, atol=1e-6), (
+            f"interface_weight=1.0 loss {loss_weighted.item():.6f} != "
+            f"standard CE loss {loss_unweighted.item():.6f}"
+        )

@@ -1,10 +1,8 @@
 """Shared structure-to-batch construction utilities for evaluation.
 
 These helpers are reused by ``score_structure``, ``score_complex``,
-``predict_ddg``, and ``evaluate_skempi`` so that ProteinMPNN and LigandMPNN
-inputs are built consistently. In particular, LigandMPNN batches always
-include ligand atom tensors (``Y``/``Y_m``/``Y_t``); ProteinMPNN batches
-omit them since the model does not consume them.
+``predict_ddg``, and ``evaluate_skempi`` so that ProteinMPNN inputs are built
+consistently.
 """
 
 from __future__ import annotations
@@ -16,34 +14,24 @@ import torch
 
 from teddympnn.data.features import (
     derive_backbone,
-    extract_ligand_atoms,
-    extract_sidechain_atoms,
     parse_structure,
 )
 
 
 def load_eval_features(
     structure_path: str | Path,
-    *,
-    model_type: str,
 ) -> dict[str, Any]:
     """Parse a structure file and assemble model-aware features.
 
     Always returns ``chain_ids``, ``residue_numbers``, ``residue_icodes``.
-    For ``model_type == "ligand_mpnn"``, also merges in non-protein
-    ligand atoms via ``extract_ligand_atoms``.
 
     Args:
         structure_path: Path to a PDB or mmCIF file.
-        model_type: ``"protein_mpnn"`` or ``"ligand_mpnn"``.
 
     Returns:
         Unbatched feature dict.
     """
-    features = parse_structure(structure_path)
-    if model_type == "ligand_mpnn":
-        features.update(extract_ligand_atoms(structure_path))
-    return features
+    return parse_structure(structure_path)
 
 
 def extract_chain_view(
@@ -55,9 +43,6 @@ def extract_chain_view(
     residue_icodes: list[str] | None = None,
 ) -> tuple[dict[str, Any], list[str], list[int], list[str]]:
     """Filter unbatched features down to a chain subset.
-
-    Ligand fields (``Y``/``Y_m``/``Y_t``) are passed through unchanged —
-    LigandMPNN context is global to the structure, not per chain.
 
     Args:
         features: Unbatched feature dict from ``load_eval_features``.
@@ -83,10 +68,6 @@ def extract_chain_view(
         if key in features:
             new_features[key] = features[key][mask]
 
-    for key in ("Y", "Y_m", "Y_t"):
-        if key in features:
-            new_features[key] = features[key]
-
     mask_list = mask.tolist()
     new_chain_ids = [cid for cid, m in zip(chain_ids, mask_list, strict=True) if m]
     new_residue_numbers = [rn for rn, m in zip(residue_numbers, mask_list, strict=True) if m]
@@ -99,27 +80,16 @@ def build_eval_batch(
     designed_mask: torch.Tensor,
     device: torch.device,
     *,
-    model_type: str,
     fixed_residue_mask: torch.Tensor | None = None,
-    include_partner_sidechains: bool = True,
 ) -> dict[str, torch.Tensor]:
     """Create a single-example (B=1) batch from unbatched features.
-
-    For LigandMPNN, the returned batch always includes ``Y``/``Y_m``/``Y_t``,
-    composed of the parsed non-protein atoms plus (optionally) the
-    fixed-partner side-chain atoms.
 
     Args:
         features: Unbatched feature dict (see ``load_eval_features``).
         designed_mask: ``(L,)`` bool — True at designed-partner residues.
         device: Device to place batch tensors on.
-        model_type: ``"protein_mpnn"`` or ``"ligand_mpnn"``.
-        fixed_residue_mask: ``(L,)`` bool — True at fixed-partner residues
-            whose side chains should be atomized. Defaults to
-            ``~designed_mask`` when ``include_partner_sidechains`` is True.
-        include_partner_sidechains: Whether to atomize the fixed partner's
-            side chains into the LigandMPNN context (no effect for
-            ProteinMPNN).
+        fixed_residue_mask: ``(L,)`` bool — True at fixed-partner residues.
+            Defaults to ``~designed_mask``.
 
     Returns:
         Batched feature dict (B=1) ready for ``model(...)``/``model.score``.
@@ -135,24 +105,5 @@ def build_eval_batch(
         "designed_residue_mask": designed_mask.unsqueeze(0).to(device),
         "fixed_residue_mask": fixed_mask.unsqueeze(0).to(device),
     }
-
-    if model_type == "ligand_mpnn":
-        Y = features.get("Y", torch.zeros(0, 3, dtype=torch.float32))
-        Y_m = features.get("Y_m", torch.zeros(0, dtype=torch.bool))
-        Y_t = features.get("Y_t", torch.zeros(0, dtype=torch.long))
-        if include_partner_sidechains and fixed_mask.any():
-            sc = extract_sidechain_atoms(
-                features["xyz_37"],
-                features["xyz_37_m"],
-                features["S"],
-                fixed_mask,
-            )
-            if sc["Y"].shape[0] > 0:
-                Y = torch.cat([Y, sc["Y"]], dim=0)
-                Y_m = torch.cat([Y_m, sc["Y_m"]], dim=0)
-                Y_t = torch.cat([Y_t, sc["Y_t"]], dim=0)
-        batch["Y"] = Y.unsqueeze(0).to(device)
-        batch["Y_m"] = Y_m.unsqueeze(0).to(device)
-        batch["Y_t"] = Y_t.unsqueeze(0).to(device)
 
     return batch
