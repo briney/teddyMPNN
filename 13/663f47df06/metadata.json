@@ -1,0 +1,36 @@
+{
+  "cli_version": "0.7.7",
+  "checkpoint_id": "13663f47df06",
+  "strategy": "manual-commit",
+  "branch": "ci/ty-and-python-matrix",
+  "checkpoints_count": 1,
+  "files_touched": [
+    ".github/workflows/ci.yaml",
+    "AGENTS.md",
+    "CLAUDE.md",
+    "README.md",
+    "pyproject.toml",
+    "src/teddympnn/cli.py",
+    "src/teddympnn/data/dataset.py",
+    "src/teddympnn/data/features.py",
+    "src/teddympnn/models/layers/feed_forward.py",
+    "src/teddympnn/models/layers/positional_encoding.py",
+    "src/teddympnn/models/protein_mpnn.py",
+    "src/teddympnn/training/trainer.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/13/663f47df06/0/metadata.json",
+      "transcript": "/13/663f47df06/0/full.jsonl",
+      "content_hash": "/13/663f47df06/0/content_hash.txt",
+      "prompt": "/13/663f47df06/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 10076,
+    "cache_creation_tokens": 92600,
+    "cache_read_tokens": 3246589,
+    "output_tokens": 53703,
+    "api_call_count": 50
+  }
+}

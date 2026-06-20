@@ -1,0 +1,71 @@
+{
+  "cli_version": "0.7.7",
+  "checkpoint_id": "13663f47df06",
+  "session_id": "f8d9d6c1-bf08-48a4-8e5c-96f72eb1c35f",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-20T16:41:47.257381455Z",
+  "branch": "ci/ty-and-python-matrix",
+  "checkpoints_count": 1,
+  "save_step_count": 1,
+  "files_touched": [
+    ".github/workflows/ci.yaml",
+    "AGENTS.md",
+    "CLAUDE.md",
+    "README.md",
+    "pyproject.toml",
+    "src/teddympnn/cli.py",
+    "src/teddympnn/data/dataset.py",
+    "src/teddympnn/data/features.py",
+    "src/teddympnn/models/layers/feed_forward.py",
+    "src/teddympnn/models/layers/positional_encoding.py",
+    "src/teddympnn/models/protein_mpnn.py",
+    "src/teddympnn/training/trainer.py"
+  ],
+  "agent": "Claude Code",
+  "model": "",
+  "turn_id": "17cfbbe781e3",
+  "token_usage": {
+    "input_tokens": 10076,
+    "cache_creation_tokens": 92600,
+    "cache_read_tokens": 3246589,
+    "output_tokens": 53703,
+    "api_call_count": 50
+  },
+  "session_metrics": {
+    "turn_count": 1
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-06-20T16:41:47.251331633Z",
+    "agent_lines": 37,
+    "agent_removed": 51,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 37,
+    "total_lines_changed": 88,
+    "agent_percentage": 100,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 11,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        ".claude/settings.local.json": 11
+      }
+    },
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 11,
+      "user_lines_removed": 0,
+      "agent_lines_added": 37,
+      "agent_lines_removed": 51,
+      "user_added_per_file": {
+        ".claude/settings.local.json": 11
+      }
+    }
+  ]
+}

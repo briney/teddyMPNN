@@ -1,0 +1,1 @@
+PR merged and branch deleted. switch back to main. id like to make some updates to our CI before going any further. first, i want to use ty instead of mypy. second, i want to test python 3.12 and 3.13 in addition to 3.11.
