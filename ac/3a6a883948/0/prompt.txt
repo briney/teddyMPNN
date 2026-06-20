@@ -1156,3 +1156,7 @@ None. (The default `interface_weight=1.0` preserves current behavior, the archit
 **All 5 items done.** No items skipped. Report appended to `.superpowers/sdd/task-9-report.md` (gitignored — written to disk only).</result>
 <usage><subagent_tokens>38117</subagent_tokens><tool_uses>23</tool_uses><duration_ms>180843</duration_ms></usage>
 </task-notification>
+
+---
+
+the PR is failing the type check on github CI. may have beeen something pre-existing or maybe a version mismatxh between the local and github environments.
