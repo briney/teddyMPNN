@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Download the bundled ProteinMPNN/LigandMPNN base checkpoints.
+"""Download the bundled ProteinMPNN base checkpoint.
 
 Run once after cloning the repo, before committing. The downloaded files are
 then version-controlled and shipped in the wheel so a fresh ``pip install``
