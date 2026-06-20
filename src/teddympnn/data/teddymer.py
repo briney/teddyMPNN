@@ -874,7 +874,7 @@ async def _fetch_domain_pdb(
         try:
             async with session.get(url, headers={"User-Agent": "Mozilla/5.0"}) as response:
                 if response.status != 200:
-                    text = await response.text()
+                    text: str = await response.text()
                     msg = f"GET {url} returned HTTP {response.status}: {text[:200]}"
                     raise RuntimeError(msg)
                 text = await response.text()
