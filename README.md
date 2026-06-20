@@ -10,7 +10,23 @@ tasks like affinity maturation and interface redesign.
 
 ## Installation
 
-teddyMPNN is not yet published to PyPI. Install from source:
+Install the latest release from PyPI:
+
+```bash
+pip install teddympnn
+```
+
+The ProteinMPNN base weights ship inside the package, so inference and
+fine-tuning work immediately — no separate download step is required.
+
+For data-download extras (`aiohttp`, `zstandard`) add `data`; for training
+monitoring (`wandb`) add `train`:
+
+```bash
+pip install "teddympnn[data,train]"
+```
+
+### From source (development)
 
 ```bash
 git clone https://github.com/briney/teddympnn.git
@@ -21,13 +37,6 @@ pip install -e ".[dev]"
 The editable install is required before running `pytest`, `ty`, or the
 `teddympnn` CLI from a checkout — the test suite imports the installed
 `teddympnn` package, not the `src/` directory.
-
-For data-download extras (`aiohttp`, `zstandard`) add `data`; for training
-monitoring (`wandb`) add `train`:
-
-```bash
-pip install -e ".[dev,data,train]"
-```
 
 ## Quick Start
 
