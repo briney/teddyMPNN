@@ -44,10 +44,6 @@ _MUT_BODY_RE = re.compile(r"^(-?\d+)([A-Za-z]?)$")
 # ---------------------------------------------------------------------------
 
 
-def _model_type(model: torch.nn.Module) -> str:
-    return "protein_mpnn"
-
-
 def _parse_mutation_body(body: str) -> tuple[int, str]:
     """Split a mutation residue body like ``"52a"`` into ``(52, "a")``."""
     m = _MUT_BODY_RE.match(body)
@@ -224,8 +220,7 @@ def score_complex(
         device = next(model.parameters()).device
     model.eval()
 
-    model_type = _model_type(model)
-    features = load_eval_features(structure_path, model_type=model_type)
+    features = load_eval_features(structure_path)
 
     chain_ids: list[str] = features["chain_ids"]
     L = len(chain_ids)
@@ -248,7 +243,6 @@ def score_complex(
         features,
         designed_mask,
         device,
-        model_type=model_type,
         fixed_residue_mask=fixed_mask,
     )
     score_mask = designed_mask.unsqueeze(0).to(device)
@@ -318,8 +312,7 @@ def predict_ddg(
         device = next(model.parameters()).device
     model.eval()
 
-    model_type = _model_type(model)
-    features = load_eval_features(structure_path, model_type=model_type)
+    features = load_eval_features(structure_path)
     chain_ids: list[str] = features["chain_ids"]
     residue_numbers: list[int] = features["residue_numbers"]
     residue_icodes: list[str] = features.get("residue_icodes", [""] * len(chain_ids))
@@ -398,42 +391,36 @@ def predict_ddg(
         features,
         full_designed_ab,
         device,
-        model_type=model_type,
         fixed_residue_mask=empty_fixed_ab,
     )
     batch_ab_mut = build_eval_batch(
         mut_features,
         full_designed_ab,
         device,
-        model_type=model_type,
         fixed_residue_mask=empty_fixed_ab,
     )
     batch_a_wt = build_eval_batch(
         chain_a_wt,
         full_designed_a,
         device,
-        model_type=model_type,
         fixed_residue_mask=empty_fixed_a,
     )
     batch_a_mut = build_eval_batch(
         chain_a_mut,
         full_designed_a,
         device,
-        model_type=model_type,
         fixed_residue_mask=empty_fixed_a,
     )
     batch_b_wt = build_eval_batch(
         chain_b_wt,
         full_designed_b,
         device,
-        model_type=model_type,
         fixed_residue_mask=empty_fixed_b,
     )
     batch_b_mut = build_eval_batch(
         chain_b_mut,
         full_designed_b,
         device,
-        model_type=model_type,
         fixed_residue_mask=empty_fixed_b,
     )
 

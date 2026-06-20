@@ -20,8 +20,6 @@ from teddympnn.data.features import (
 
 def load_eval_features(
     structure_path: str | Path,
-    *,
-    model_type: str,
 ) -> dict[str, Any]:
     """Parse a structure file and assemble model-aware features.
 
@@ -29,7 +27,6 @@ def load_eval_features(
 
     Args:
         structure_path: Path to a PDB or mmCIF file.
-        model_type: Must be ``"protein_mpnn"``.
 
     Returns:
         Unbatched feature dict.
@@ -83,7 +80,6 @@ def build_eval_batch(
     designed_mask: torch.Tensor,
     device: torch.device,
     *,
-    model_type: str,
     fixed_residue_mask: torch.Tensor | None = None,
     include_partner_sidechains: bool = True,
 ) -> dict[str, torch.Tensor]:
@@ -93,7 +89,6 @@ def build_eval_batch(
         features: Unbatched feature dict (see ``load_eval_features``).
         designed_mask: ``(L,)`` bool — True at designed-partner residues.
         device: Device to place batch tensors on.
-        model_type: Must be ``"protein_mpnn"``.
         fixed_residue_mask: ``(L,)`` bool — True at fixed-partner residues.
             Defaults to ``~designed_mask``.
         include_partner_sidechains: Unused; kept for API compatibility.
