@@ -1,0 +1,1162 @@
+Approved
+
+---
+
+<task-notification>
+<task-id>ac77e51d761fb8fd5</task-id>
+<tool-use-id>toolu_01GS5xZA3BQgkYG9tthHmVhk</tool-use-id>
+<output-file>/tmp/claude-1001/-home-briney-git-teddympnn/2582a0ca-bf45-41f2-851e-7c4484ebdcff/tasks/ac77e51d761fb8fd5.output</output-file>
+<status>completed</status>
+<summary>Agent "Map ligand/nvidia/export removal points" came to rest</summary>
+<note>A task-notification fires each time this agent comes to rest with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>Perfect! Now let me compile the complete removal map. Let me write a comprehensive summary based on all the information I've gathered:
+
+## PRECISE REMOVAL MAP FOR TEDDYMPNN REFACTOR
+
+Based on my thorough analysis of the codebase, here is the exact removal map with file paths, line ranges, and code references:
+
+---
+
+### **1. LIGANDMPNN MODEL REMOVAL**
+
+**Primary file to delete:**
+- `/home/briney/git/teddympnn/src/teddympnn/models/ligand_mpnn.py` — entire file (244 lines)
+  - Class `LigandMPNN` (lines 24-244): standalone subclass extending `ProteinMPNN`
+  - Contains ligand-specific context encoder layers, graph featurization replacement, ligand context embedding projections
+  - No shared code; all methods are LigandMPNN-only
+
+**In `/home/briney/git/teddympnn/src/teddympnn/models/__init__.py`** (9 lines):
+- Line 5: `from teddympnn.models.ligand_mpnn import LigandMPNN` — DELETE
+- Line 8: `"LigandMPNN"` export in `__all__` — DELETE
+
+**In `/home/briney/git/teddympnn/src/teddympnn/config.py`**:
+- Line 24: `from teddympnn.models.ligand_mpnn import LigandMPNN` — DELETE
+- Line 28: `ModelType = Literal["protein_mpnn", "ligand_mpnn"]` → change to `Literal["protein_mpnn"]`
+- Lines 31-34: `_MODEL_TYPE_TO_CLASS` dict — DELETE entry: `"ligand_mpnn": LigandMPNN,` (lines 32-33)
+- Lines 36-47: `_MODEL_TYPE_TRAINING_DEFAULTS` dict — DELETE entry for `"ligand_mpnn"` (lines 42-46)
+- Line 81: `num_context_atoms: int | None = None  # ligand_mpnn only` — DELETE (ModelConfig field; only used by LigandMPNN)
+- Lines 128-147: Validator logic checking `is_ligand = self.model_type == "ligand_mpnn"` — SIMPLIFY to remove all ligand-specific branches:
+  - Lines 131-133: `if not is_ligand and self.model.num_context_atoms is not None:` block — DELETE
+  - Lines 146-147: `if is_ligand and self.model.num_context_atoms is None:` block — DELETE
+
+**In `/home/briney/git/teddympnn/src/teddympnn/cli.py`**:
+- Lines 148-159: `@download_app.command() def pretrained(...)` — KEEP but simplify: remove model type option default `"ligand_mpnn"` (line 151), make it protein_mpnn only or error if ligand_mpnn requested
+- Lines 204-224: `@checkpoints_app.command("export-foundry") def export_foundry(...)` — SIMPLIFY (lines 208-223):
+  - Line 214: `from teddympnn.models import LigandMPNN, ProteinMPNN` → remove `LigandMPNN` import
+  - Line 218: `model_cls = LigandMPNN if model_type == "ligand_mpnn" else ProteinMPNN` → DELETE, hardcode `model_cls = ProteinMPNN`
+  - Line 209: model_type Option default remains for now (used elsewhere), but export only supports protein_mpnn
+- Lines 231-281: `@evaluate_app.command() def recovery(...)` — SIMPLIFY (lines 235-237, 249-256):
+  - Lines 249-256: model selection logic → hardcode to ProteinMPNN, remove model_type option or error if not protein_mpnn
+  - Line 259: `include_ligand_atoms=(model_type == "ligand_mpnn")` → hardcode to `False`
+- Lines 283-339: `@evaluate_app.command() def benchmark(...)` — KEEP (will be deleted entirely in section 4)
+- Lines 341-384: `@evaluate_app.command() def ddg(...)` — SIMPLIFY (lines 346-348, 356-365):
+  - Lines 356-365: model selection → hardcode to ProteinMPNN
+- Lines 391-472: `@app.command() def score(...)` — SIMPLIFY (lines 397-460):
+  - Line 415: `model_cls = LigandMPNN if model_type == "ligand_mpnn" else ProteinMPNN` → hardcode to ProteinMPNN
+  - Lines 443-460: `if model_type == "ligand_mpnn":` block — DELETE (ligand atom extraction)
+
+---
+
+### **2. LIGAND DATA BRANCHES** (code shared with ProteinMPNN graph/features)
+
+**In `/home/briney/git/teddympnn/src/teddympnn/data/features.py`**:
+- Lines 49-172: Element type constants and `element_to_idx` map — **KEEP** (used by `extract_ligand_atoms` which will be deleted)
+- Lines 175-177: `EXCLUDED_LIGAND_RESIDUES`, `EXCLUDED_IONS` — **DELETE** (only used by `extract_ligand_atoms`)
+- Lines 388-446: `def extract_ligand_atoms(...)` — **DELETE ENTIRE FUNCTION** (194 lines); returns `{Y, Y_m, Y_t}`
+- Lines 483-541: `def extract_sidechain_atoms(...)` — **DELETE ENTIRE FUNCTION** (59 lines); extracts fixed-partner side-chain atoms for LigandMPNN context
+
+**In `/home/briney/git/teddympnn/src/teddympnn/data/dataset.py`**:
+- Lines 65-66: `include_ligand_atoms: bool = False` parameter in `__init__` — DELETE
+- Lines 74-75: `self.include_ligand_atoms = include_ligand_atoms` — DELETE
+- Lines 104-106: `atomize_partner_sidechains`, `sidechain_atomization_probability`, `sidechain_atomization_per_residue_probability` parameters — DELETE
+- Lines 76-80: store these parameters — DELETE
+- Lines 232-235: `if self.include_ligand_atoms: ligand = extract_ligand_atoms(...)` block in `_load_features` — DELETE
+- Lines 288-323: `if self.include_ligand_atoms and "Y" in features:` block in `__getitem__` — DELETE entire ligand context section (36 lines)
+- After deletion, lines 321-323 become unconditional: always return empty Y/Y_m/Y_t tensors or DELETE them too
+
+**In `/home/briney/git/teddympnn/src/teddympnn/data/collator.py`**:
+- Lines 58: `LIGAND_KEYS: frozenset[str] = frozenset({"Y", "Y_m", "Y_t"})` — DELETE
+- Lines 79: `N_max = max(b["Y"].shape[0] for b in batch) if "Y" in batch[0] else 0` — SIMPLIFY to `N_max = 0` (or remove N_max logic entirely)
+- Lines 84-86: ligand key padding logic `elif key in self.LIGAND_KEYS:` — DELETE
+- Lines 27: `"Y": 0.0, "Y_m": False, "Y_t": 0,` in `_PAD_VALUES` — DELETE
+
+**In `/home/briney/git/teddympnn/src/teddympnn/data/sampler.py`**:
+- Line 29-30: comment mentioning "For LigandMPNN training the recommended value is ~6,000" — update to remove LigandMPNN reference
+
+**In `/home/briney/git/teddympnn/src/teddympnn/data/__init__.py`**:
+- Line 13: `extract_ligand_atoms` export — DELETE
+
+**Config knobs tied to LigandMPNN in `/home/briney/git/teddympnn/src/teddympnn/config.py`**:
+- Line 104: `atomize_partner_sidechains: bool = True` — DELETE
+- Line 105-106: `sidechain_atomization_probability`, `sidechain_atomization_per_residue_probability` — DELETE
+
+---
+
+### **3. NVIDIA REMOVAL**
+
+**File to delete entirely:**
+- `/home/briney/git/teddympnn/src/teddympnn/data/nvidia_complexes.py` (entire file, ~250 lines)
+  - Functions: `download_nvidia_metadata`, `filter_nvidia_metadata`, `download_nvidia_chunks`, `extract_nvidia_structures`
+
+**In `/home/briney/git/teddympnn/src/teddympnn/cli.py`**:
+- Lines 91-118: `@download_app.command("nvidia-complexes")` entire command — DELETE (28 lines)
+
+**In `/home/briney/git/teddympnn/src/teddympnn/config.py`**:
+- Line 29: `SourceType = Literal["teddymer", "nvidia", "pdb"]` → change to `Literal["teddymer", "pdb"]`
+- Lines 65-66: `DataConfig` field types reference SourceType — automatically updated when SourceType changes
+
+**In `/home/briney/git/teddympnn/src/teddympnn/data/splits.py`**:
+- Lines 113-159: `def split_nvidia_manifest(...)` — DELETE ENTIRE FUNCTION (47 lines)
+- Lines 349-363: `if nvidia_manifest is not None:` block in `prepare_manifests` — DELETE (15 lines)
+  - Calls `split_nvidia_manifest`, normalizes, writes train/val TSVs, adds to source_paths
+
+**In `/home/briney/git/teddympnn/src/teddympnn/data/__init__.py`** — no direct exports
+
+**In `/home/briney/git/teddympnn/configs/train.yaml`**:
+- Lines 16-19: `nvidia:` source config block — DELETE (4 lines):
+  ```yaml
+  nvidia:
+    path: data/manifests/train_nvidia.tsv
+    ratio: 0.20
+  ```
+- Lines 27-29: `nvidia:` validation block — DELETE (3 lines)
+
+---
+
+### **4. BENCHMARK REMOVAL**
+
+**File to delete:**
+- `/home/briney/git/teddympnn/src/teddympnn/evaluation/benchmark.py` (entire file, 295 lines)
+  - Classes: `ModelSpec`, `BenchmarkResult`, `BenchmarkReport`
+  - Functions: `_load_model`, `run_benchmark`, `print_comparison_table`
+
+**In `/home/briney/git/teddympnn/src/teddympnn/evaluation/__init__.py`**:
+- Lines 5: `from teddympnn.evaluation.benchmark import BenchmarkReport, BenchmarkResult, run_benchmark` — DELETE
+- Lines 14-15: exports `BenchmarkReport, BenchmarkResult, run_benchmark` — DELETE these three names from `__all__`
+
+**In `/home/briney/git/teddympnn/src/teddympnn/cli.py`**:
+- Lines 283-339: `@evaluate_app.command() def benchmark(...)` entire command — DELETE (57 lines)
+
+**File to delete:**
+- `/home/briney/git/teddympnn/scripts/run_benchmark.py` (entire file, 127 lines)
+  - Convenience wrapper around `teddympnn evaluate benchmark`
+
+**File to delete:**
+- `/home/briney/git/teddympnn/configs/benchmark.yaml` (entire file, 36 lines)
+  - Configuration for benchmark command (now removed)
+
+---
+
+### **5. WEIGHT-EXPORT TRIM**
+
+**LOAD paths (KEEP):**
+- `/home/briney/git/teddympnn/src/teddympnn/weights/foundry.py` lines 20-51: `load_foundry_checkpoint` — KEEP (loading from Foundry format)
+- `/home/briney/git/teddympnn/src/teddympnn/weights/io.py` lines 44-138: `save_checkpoint_bundle`, `load_checkpoint_bundle`, `load_model_weights`, `download_pretrained` — KEEP all (native checkpoint I/O)
+- `/home/briney/git/teddympnn/src/teddympnn/weights/legacy.py` lines 222-280: `load_legacy_weights` — KEEP (loading old IPD weights)
+
+**EXPORT/conversion paths (DELETE):**
+- `/home/briney/git/teddympnn/src/teddympnn/weights/foundry.py` lines 54-79: `export_foundry_checkpoint` — DELETE (writing Foundry format)
+- `/home/briney/git/teddympnn/src/teddympnn/weights/legacy.py` lines 283-317: `convert_to_legacy` — DELETE (exporting to legacy format for backward compat)
+- `/home/briney/git/teddympnn/src/teddympnn/weights/legacy.py` lines 197-219: `_restore_120th_atom_type` — DELETE (only used by `convert_to_legacy`)
+- Note: `_drop_120th_atom_type` (lines 167-194) is used by `load_legacy_weights` — KEEP
+
+**In `/home/briney/git/teddympnn/src/teddympnn/cli.py`**:
+- Lines 204-224: `@checkpoints_app.command("export-foundry")` command — DELETE entirely (21 lines)
+  - Imports: line 214 `from teddympnn.weights.foundry import export_foundry_checkpoint` removed
+  - Import line 215 `from teddympnn.weights.io import load_checkpoint_bundle` — DELETE if not used elsewhere (it's used here)
+
+---
+
+### **6. EVAL CONSOLIDATION**
+
+**Relationship summary:**
+
+| File | Functions | Dependencies |
+|------|-----------|--------------|
+| `evaluation/_batch.py` | `load_eval_features`, `extract_chain_view`, `build_eval_batch` | None (no imports from binding_affinity/skempi) |
+| `evaluation/binding_affinity.py` | `score_structure`, `score_complex`, `predict_ddg` | imports `_batch.py` helpers, imports `LigandMPNN` (can be removed) |
+| `evaluation/skempi.py` | `evaluate_skempi`, parse/download helpers | imports `binding_affinity.predict_ddg`, does NOT import `benchmark.py` |
+
+**Key finding:** `skempi.py` imports `predict_ddg` from `binding_affinity.py` (line 20). The `binding_affinity.py` currently imports `LigandMPNN` (line 26) for the `_model_type` helper. After LigandMPNN deletion, simplify `_model_type` (lines 48-49) to always return "protein_mpnn" or remove it entirely.
+
+**No consolidation needed.** Sequence recovery, binding affinity, and SKEMPI are separate evaluation paths:
+- `sequence_recovery.py` — interface recovery metric (independent)
+- `binding_affinity.py` + `_batch.py` — ddG prediction (shared batch construction)
+- `skempi.py` — SKEMPI benchmark driver (calls `predict_ddg`)
+- `benchmark.py` — DELETES; it ran all three (recovery + skempi) across multiple models
+
+**In `/home/briney/git/teddympnn/src/teddympnn/evaluation/binding_affinity.py`**:
+- Line 26: `from teddympnn.models.ligand_mpnn import LigandMPNN` — DELETE
+- Lines 48-49: `_model_type` helper — SIMPLIFY to `return "protein_mpnn"` (no longer needs isinstance check)
+
+---
+
+### **7. CLI COMMAND INVENTORY**
+
+All `typer.Typer` commands in `/home/briney/git/teddympnn/src/teddympnn/cli.py`:
+
+| Command | Lines | Type | Action |
+|---------|-------|------|--------|
+| `main` (version) | 26-35 | Root callback | KEEP |
+| `download teddymer` | 43-89 | download sub | KEEP |
+| `download nvidia-complexes` | 91-118 | download sub | **DELETE** |
+| `download prepare-manifests` | 120-145 | download sub | KEEP (update to remove nvidia handling) |
+| `download pretrained` | 147-159 | download sub | KEEP (simplify to protein_mpnn only) |
+| `train` | 167-197 | root | KEEP |
+| `checkpoints export-foundry` | 204-224 | checkpoints sub | **DELETE** |
+| `evaluate recovery` | 231-281 | evaluate sub | KEEP (simplify) |
+| `evaluate benchmark` | 283-339 | evaluate sub | **DELETE** |
+| `evaluate ddg` | 341-384 | evaluate sub | KEEP (simplify) |
+| `score` | 391-472 | root | KEEP (simplify) |
+
+**Commands to delete:**
+- `benchmark` (lines 283-339)
+- `nvidia-complexes` (lines 91-118)
+- `export-foundry` (lines 204-224)
+
+---
+
+### **8. TEST FILES FOR DELETION/EDITING**
+
+**Files to delete entirely:**
+- `/home/briney/git/teddympnn/tests/models/test_ligand_mpnn.py` — LigandMPNN tests only
+- `/home/briney/git/teddympnn/tests/evaluation/test_benchmark.py` — benchmark tests only
+- `/home/briney/git/teddympnn/tests/data/test_nvidia_complexes.py` — NVIDIA tests only
+- `/home/briney/git/teddympnn/tests/weights/test_legacy.py` — legacy weight export tests (lines testing `convert_to_legacy` and `_restore_120th_atom_type`; keep lines testing `load_legacy_weights`)
+
+**Files needing edits:**
+
+1. `/home/briney/git/teddympnn/tests/test_config.py` — remove or update tests for `ligand_mpnn` model_type and `num_context_atoms`
+
+2. `/home/briney/git/teddympnn/tests/test_cli.py` — remove or update:
+   - benchmark command tests
+   - export-foundry command tests
+   - nvidia-complexes command tests
+   - model_type="ligand_mpnn" option tests
+
+3. `/home/briney/git/teddympnn/tests/data/test_dataset.py` — remove or update:
+   - `include_ligand_atoms` parameter tests
+   - `atomize_partner_sidechains` parameter tests
+
+4. `/home/briney/git/teddympnn/tests/data/test_splits.py` — remove or update:
+   - `split_nvidia_manifest` tests
+   - NVIDIA handling in `prepare_manifests` tests
+
+5. `/home/briney/git/teddympnn/tests/evaluation/test_sequence_recovery.py` — check for `model_type="ligand_mpnn"` references; remove
+
+6. `/home/briney/git/teddympnn/tests/evaluation/test_skempi.py` — check for ligand-specific test cases; remove
+
+7. `/home/briney/git/teddympnn/tests/weights/test_foundry.py` — remove `export_foundry_checkpoint` tests; keep loading tests
+
+8. `/home/briney/git/teddympnn/tests/weights/test_io.py` — may need updates if it tests model_type selection
+
+9. `/home/briney/git/teddympnn/tests/validation/test_foundry_equivalence.py` — likely tests export; may need deletion or substantial rework
+
+---
+
+### **9. LINE COUNTS**
+
+| File | Total Lines | Ligand/NVIDIA Code | Post-Deletion Estimate |
+|------|-------------|-------------------|----------------------|
+| `data/teddymer.py` | 968 | ~0 (teddymer-only) | **968** (no change) |
+| `data/splits.py` | 418 | ~47 (split_nvidia_manifest) | **~371** |
+| `data/dataset.py` | 454 | ~95 (include_ligand_atoms, atomize_partner, Y context) | **~359** |
+| `training/trainer.py` | 520 | ~40 (is_ligand flag, include_ligand_atoms init) | **~480** |
+| `cli.py` | 471 | ~109 (nvidia-complexes, export-foundry, benchmark, model_type branches) | **~362** |
+
+---
+
+### **Summary Statistics**
+
+- **Standalone files to delete:** 5 files (~600 lines)
+  - `src/teddympnn/models/ligand_mpnn.py` (244 lines)
+  - `src/teddympnn/data/nvidia_complexes.py` (~250 lines)
+  - `src/teddympnn/evaluation/benchmark.py` (295 lines)
+  - `scripts/run_benchmark.py` (127 lines)
+  - `configs/benchmark.yaml` (36 lines)
+
+- **Test files to delete:** 3 files
+  - `tests/models/test_ligand_mpnn.py`
+  - `tests/evaluation/test_benchmark.py`
+  - `tests/data/test_nvidia_complexes.py`
+
+- **Functions to delete:** ~15 functions
+  - `extract_ligand_atoms`, `extract_sidechain_atoms` (data/features.py)
+  - `split_nvidia_manifest` (data/splits.py)
+  - `download_nvidia_*`, `filter_nvidia_*`, `extract_nvidia_*` (nvidia_complexes.py)
+  - `export_foundry_checkpoint` (weights/foundry.py)
+  - `convert_to_legacy` (weights/legacy.py)
+  - `_load_model`, `run_benchmark`, `print_comparison_table` (benchmark.py)
+
+- **Config fields to delete:** 5 fields
+  - `num_context_atoms` in ModelConfig
+  - `atomize_partner_sidechains`, `sidechain_atomization_probability`, `sidechain_atomization_per_residue_probability` in TrainingConfig
+  - `nvidia` entries in train.yaml
+
+- **CLI commands to delete:** 3 commands
+  - `download nvidia-complexes`
+  - `checkpoints export-foundry`
+  - `evaluate benchmark`</result>
+<usage><subagent_tokens>76322</subagent_tokens><tool_uses>39</tool_uses><duration_ms>94052</duration_ms></usage>
+</task-notification>
+
+---
+
+subagent-driven
+
+---
+
+<task-notification>
+<task-id>afadeaa7f6cd55470</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/tmp/claude-1001/-home-briney-git-teddympnn/2582a0ca-bf45-41f2-851e-7c4484ebdcff/tasks/afadeaa7f6cd55470.output</output-file>
+<status>completed</status>
+<summary>Agent "Implement Task 1: remove benchmark" came to rest</summary>
+<note>A task-notification fires each time this agent comes to rest with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>---
+
+**Status:** DONE
+
+**Commits created:** `64adb9d evaluation: remove multi-model benchmark harness`
+
+**Test summary:** 325 passing (335 baseline minus 10 deleted benchmark tests), output pristine apart from the known scheduler warnings
+
+**Concerns:** None. The only remaining "benchmark" grep hits are SKEMPI-related docstrings in the unrelated skempi module — not references to the removed harness.
+
+**Report file:** `/home/briney/git/teddympnn/.superpowers/sdd/task-1-report.md`</result>
+<usage><subagent_tokens>32651</subagent_tokens><tool_uses>20</tool_uses><duration_ms>174568</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>af3036bfe6c9968b1</task-id>
+<tool-use-id>toolu_01APZA3Uvf81Q9RwqHPJpfPg</tool-use-id>
+<output-file>/tmp/claude-1001/-home-briney-git-teddympnn/2582a0ca-bf45-41f2-851e-7c4484ebdcff/tasks/af3036bfe6c9968b1.output</output-file>
+<status>completed</status>
+<summary>Agent "Review Task 1 (spec + quality)" came to rest</summary>
+<note>A task-notification fires each time this agent comes to rest with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>All three grep hits in `skempi.py` are confirmed to be docstring-only references to the SKEMPI dataset being described as a "benchmark" (lines 1, 60, and 328), not references to the removed `run_benchmark`/`BenchmarkReport`/`BenchmarkResult` harness or CLI command.
+
+---
+
+## Spec Compliance: ✅
+
+### Part 1: Spec Compliance
+
+Every step in the task brief is accounted for and correctly executed:
+
+**Step 1 (Delete standalone files):** All four files are deleted in the diff — `benchmark.py`, `run_benchmark.py`, `benchmark.yaml`, `test_benchmark.py`. Correct.
+
+**Step 2 (Drop benchmark exports from `evaluation/__init__.py`):** The diff removes the `from teddympnn.evaluation.benchmark import BenchmarkReport, BenchmarkResult, run_benchmark` line and removes all three names from `__all__`. The resulting file matches the spec's expected output exactly.
+
+**Step 3 (Remove `evaluate benchmark` CLI command):** The entire `@evaluate_app.command() def benchmark(...)` block is deleted from `cli.py`. The `yaml` import and the `from teddympnn.evaluation.benchmark import ...` inside that function are removed with it (they were local imports inside the function body, so no orphaned top-level imports were left). The `recovery` and `ddg` commands are untouched, confirmed by the diff context showing them adjacent and intact.
+
+**Step 4 (Remove benchmark tests from `tests/test_cli.py`):** The `test_evaluate_benchmark_help` test method is deleted. No other benchmark-related test functions were found.
+
+**Named risk — skempi.py benchmark hits:** Lines 1, 60, and 328 are all docstring prose where "benchmark" describes the SKEMPI dataset (e.g., "SKEMPI v2.0 benchmark for binding affinity prediction", "Aggregate SKEMPI v2.0 benchmark results", "Run the full SKEMPI v2.0 benchmark"). None reference `run_benchmark`, `BenchmarkReport`, `BenchmarkResult`, or any harness construct. These are false positives with respect to the deleted harness; they are correct and should remain.
+
+**Scope preservation:** `evaluate recovery` and `evaluate ddg` are untouched. The diff shows the `ddg` command immediately following the deleted benchmark block with no modification.
+
+**Test count:** 335 − 10 (deleted `test_benchmark.py` tests) = 325 passing. Matches reported result.
+
+**Commit message:** `evaluation: remove multi-model benchmark harness` — matches the `&lt;component&gt;: &lt;what changed and why&gt;` format and the brief's suggested message exactly.
+
+---
+
+### Part 2: Code Quality
+
+**Strengths:**
+- Pure deletion task executed cleanly with no accidental collateral damage to adjacent code.
+- Local imports inside the CLI `benchmark` function meant no orphaned top-level imports were left behind — nothing needed special cleanup.
+- `__all__` in `evaluation/__init__.py` is left in correct alphabetical order after removal.
+- The diff is minimal and surgical — 690 deletions, 0 additions, exactly the expected scope.
+
+**Issues:**
+
+None found. There are no critical, important, or minor issues. This is a deletion-only task and the implementation is complete and correct. There are no leftover stubs, no dangling imports, no accidental changes to retained code, and no regressions to the non-benchmark evaluation surface.
+
+---
+
+**Assessment — Task quality: Approved**</result>
+<usage><subagent_tokens>31153</subagent_tokens><tool_uses>6</tool_uses><duration_ms>34022</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>aaa994447b450e936</task-id>
+<tool-use-id>toolu_013jJTL7xSZExuKbbqH7snK7</tool-use-id>
+<output-file>/tmp/claude-1001/-home-briney-git-teddympnn/2582a0ca-bf45-41f2-851e-7c4484ebdcff/tasks/aaa994447b450e936.output</output-file>
+<status>completed</status>
+<summary>Agent "Implement Task 2: remove NVIDIA" came to rest</summary>
+<note>A task-notification fires each time this agent comes to rest with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>**Status: DONE**
+
+- **Commit:** `3b7188c` — data: remove NVIDIA complexes data source
+- **Tests:** 316 passed, 0 failures (down from 325 — 9 tests removed as expected: the `test_nvidia_complexes.py` file, `TestSplitNvidia`, `test_download_nvidia_help`, and one parametrized `per_source_manifest` case)
+- **Lint/types:** `ruff check` clean, `ruff format` no changes, `mypy` clean (35 source files)
+- **nvidia grep:** zero matches across `src/`, `tests/`, `scripts/`, `configs/`
+- **Concerns:** None — all changes follow the brief exactly
+- **Report:** `/home/briney/git/teddympnn/.superpowers/sdd/task-2-report.md`</result>
+<usage><subagent_tokens>73897</subagent_tokens><tool_uses>50</tool_uses><duration_ms>313616</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>a38bd0f67f6048775</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/tmp/claude-1001/-home-briney-git-teddympnn/2582a0ca-bf45-41f2-851e-7c4484ebdcff/tasks/a38bd0f67f6048775.output</output-file>
+<status>completed</status>
+<summary>Agent "Review Task 2 (spec + quality)" came to rest</summary>
+<note>A task-notification fires each time this agent comes to rest with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>No `nvidia_manifest` references anywhere. The named risk is fully resolved. Here is the complete review.
+
+---
+
+## Spec Compliance: ✅
+
+Every step in the brief was executed correctly and completely.
+
+**Step-by-step verification against the brief:**
+
+1. **Delete standalone files** — `src/teddympnn/data/nvidia_complexes.py` and `tests/data/test_nvidia_complexes.py` are both deleted in the diff.
+2. **`SourceType` narrowed** — `config.py` line 29: `Literal["teddymer", "nvidia", "pdb"]` → `Literal["teddymer", "pdb"]`. Correct.
+3. **`splits.py` cleaned** — `split_nvidia_manifest` function entirely removed. `nvidia_manifest` parameter removed from `prepare_manifests` signature and docstring. The nvidia block inside `prepare_manifests` is gone. No `nvidia` token remains in the file (confirmed via `grep`).
+4. **`cli.py` cleaned** — `@download_app.command("nvidia-complexes")` function deleted. The `--nvidia` option and `nvidia_manifest=` passthrough removed from `prepare_manifests_cmd`. Both call sites pass no `nvidia_manifest` argument.
+5. **`configs/train.yaml`** — Both `nvidia:` blocks under `data.train` and `data.validation` removed; ratios updated to 80/20.
+6. **Tests purged** — `test_splits.py`: `split_nvidia_manifest` import removed, `nvidia_manifest` fixture removed, `TestSplitNvidia` class removed, `test_multiple_sources` updated. `test_cli.py`: `test_download_nvidia_help` removed. `test_dataset.py`: nvidia row removed from fixture and parametrize list. `test_sequence_recovery.py`: `"nvidia"` replaced with `"pdb"` in source list and assertion.
+7. **Named risk check** — All three callers of `prepare_manifests` (CLI `prepare-manifests` command in `cli.py`, `scripts/prepare_data.py`, and the three call sites in `tests/data/test_splits.py`) were updated consistently. Zero occurrences of `nvidia_manifest=` anywhere in the codebase. Confirmed via live `grep`.
+8. **Teddymer and PDB paths intact** — `split_teddymer_manifest`, `split_pdb_manifest`, and their paths through `prepare_manifests` are untouched. The teddymer and PDB blocks in `splits.py` are byte-identical to baseline.
+9. **Verification** — `grep -rni "nvidia" src tests scripts configs` → zero matches (confirmed live). `pytest` 316 passed (−9 are the deleted tests, all accounted for). `ruff` and `mypy` clean.
+
+---
+
+## Strengths
+
+- **Surgical and complete**: Every nvidia token was removed without disturbing teddymer or PDB handling.
+- **All three caller sites updated**: CLI, script, and test all consistently drop `nvidia_manifest=`. No orphaned argument anywhere.
+- **Test count delta is fully explained**: −5 (deleted test file) −1 (`TestSplitNvidia::test_split_by_complex`) −1 (`test_download_nvidia_help`) −1 (parametrize case in `TestPerSourceManifestContract`) −1 (implicit: `test_multiple_sources` was updated in-place, not removed). Total: −9. Matches 325→316.
+- **Docstrings and comments updated consistently**: `splits.py` module docstring, `_normalize_to_training_manifest` docstring, `dataset.py` module docstring, `sequence_recovery.py` attribute docstring — all updated to reflect the two-source world.
+- **`configs/train.yaml` ratios correct**: 0.60+0.20+0.20=1.0 → 0.80+0.20=1.0. Arithmetic preserved.
+- **`scripts/` also cleaned**: `prepare_data.py` and `launch_training.py` both updated to remove nvidia ablation runs, `--skip-nvidia` flag, and the nvidia step. These were not in the brief's file list but were clearly in scope and handled correctly.
+
+---
+
+## Issues
+
+None. No critical, important, or minor issues found. The diff is clean, minimal, and exactly on-spec.
+
+---
+
+## Assessment
+
+**Task quality: Approved**
+
+This is a textbook mechanical removal. Every reference to nvidia was found and eliminated, all callers were updated, teddymer and PDB handling is provably untouched, and the test suite passes with a fully explained test-count delta.</result>
+<usage><subagent_tokens>43657</subagent_tokens><tool_uses>7</tool_uses><duration_ms>43987</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>a4de4c8ff0ea04ce3</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/tmp/claude-1001/-home-briney-git-teddympnn/2582a0ca-bf45-41f2-851e-7c4484ebdcff/tasks/a4de4c8ff0ea04ce3.output</output-file>
+<status>completed</status>
+<summary>Agent "Implement Task 3: remove LigandMPNN" came to rest</summary>
+<note>A task-notification fires each time this agent comes to rest with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>---
+
+**Status: DONE_WITH_CONCERNS**
+
+**Commit:** `49175db` — models: drop LigandMPNN and all model-type selection
+
+**Test summary:** 290 passed, 4 warnings (pre-existing scheduler warnings). 26 tests removed (all tested deleted LigandMPNN functionality). 0 regressions.
+
+**Concerns:**
+1. `NOTICES.md` and `dataset.py` (`atomize_partner_sidechains`) still match the brief's grep — both are intentional: NOTICES.md is a markdown attribution file (not code), and `dataset.py` data code is explicitly deferred to Task 4.
+2. `weights/io.py` download URL changed from `pub/ligandmpnn/proteinmpnn_*.pt` to `pub/proteinmpnn/proteinmpnn_*.pt`. The IPD server may still host ProteinMPNN weights at the old `pub/ligandmpnn/` path — this is untested and should be verified before using `download pretrained` CLI.
+
+**Report:** `/home/briney/git/teddympnn/.superpowers/sdd/task-3-report.md`</result>
+<usage><subagent_tokens>155482</subagent_tokens><tool_uses>156</tool_uses><duration_ms>958919</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>a50ced85ce65ac9fd</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/tmp/claude-1001/-home-briney-git-teddympnn/2582a0ca-bf45-41f2-851e-7c4484ebdcff/tasks/a50ced85ce65ac9fd.output</output-file>
+<status>completed</status>
+<summary>Agent "Fix Task 3 download URL regression" came to rest</summary>
+<note>A task-notification fires each time this agent comes to rest with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>## Status: DONE
+
+**Commit:** `7e61f17` — weights: keep real IPD download path for ProteinMPNN weights
+
+**Test:** `python -m pytest tests/weights/test_io.py -q` → 5 passed
+
+**Changes:** Fixed `src/teddympnn/weights/io.py` by restoring ProteinMPNN URLs to real IPD path `pub/ligandmpnn/` (not `pub/proteinmpnn/`). Introduced `_IPD_BASE_URL` constant for cleaner URL construction. All linting and type checks passed.</result>
+<usage><subagent_tokens>25311</subagent_tokens><tool_uses>10</tool_uses><duration_ms>30337</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>a9a8bdb57b2835fe0</task-id>
+<tool-use-id>toolu_01XtmeTKtxiiYX1oa3hSWbbu</tool-use-id>
+<output-file>/tmp/claude-1001/-home-briney-git-teddympnn/2582a0ca-bf45-41f2-851e-7c4484ebdcff/tasks/a9a8bdb57b2835fe0.output</output-file>
+<status>completed</status>
+<summary>Agent "Review Task 3 (spec + quality)" came to rest</summary>
+<note>A task-notification fires each time this agent comes to rest with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>I have everything I need to write the review. Here is the full assessment:
+
+---
+
+## Part 1: Spec Compliance
+
+**Verdict: ✅ Compliant**
+
+All seven required steps from the brief are fully implemented and the net result of both commits is correct:
+
+**Step 1** — `src/teddympnn/models/ligand_mpnn.py` and `tests/models/test_ligand_mpnn.py` deleted. Confirmed.
+
+**Step 2** — `models/__init__.py` exports only `ProteinMPNN`. Confirmed: diff shows `__all__ = ["ProteinMPNN"]`.
+
+**Step 3** — `config.py` is precisely aligned with the brief's required replacement:
+- `LigandMPNN` import removed.
+- `ModelType = Literal["protein_mpnn"]`. Confirmed.
+- `_MODEL_TYPE_TO_CLASS` has only `"protein_mpnn"`. Confirmed.
+- `_MODEL_TYPE_TRAINING_DEFAULTS` has only the `"protein_mpnn"` entry. Confirmed.
+- `ModelConfig.num_context_atoms` removed. Confirmed.
+- `TrainingConfig` fields `atomize_partner_sidechains`, `sidechain_atomization_probability`, `sidechain_atomization_per_residue_probability` removed. Confirmed.
+- `apply_model_defaults`: `is_ligand` gone; `num_context_atoms` validation block gone; remaining structure matches the brief's exact excerpt. Confirmed.
+
+**Step 4** — `trainer.py` hardcodes `model_cls = ProteinMPNN`, drops `if is_ligand:` block, removes all four ligand kwargs from both `PPIDataset(...)` calls. Confirmed.
+
+**Step 5** — `binding_affinity.py`: `LigandMPNN` import deleted; `_model_type()` unconditionally returns `"protein_mpnn"`. Confirmed.
+
+**Step 6** — `cli.py` removes `model_type` option from `score`, `recovery`, `ddg`, `export-foundry`, and `pretrained`; every site hardcodes `ProteinMPNN`. `_batch.py` fully simplified (Y/Y_m/Y_t branches removed, `extract_ligand_atoms`/`extract_sidechain_atoms` imports gone). `sequence_recovery.py`, `skempi.py` updated (docstrings only, no behavioral branches to remove). Confirmed.
+
+**Step 7** — `test_config.py` drops all `ligand_mpnn` and `num_context_atoms` cases; `test_e2e_training.py` drops `_LIGANDMPNN_WEIGHTS`; `test_foundry_equivalence.py` drops all five LigandMPNN test classes; `test_io.py` updated. Confirmed.
+
+**Named risk 1 (config.py `apply_model_defaults`)** — No leftover `is_ligand`, `num_context_atoms`, or ligand training-default lookups. Exact match to brief's required shape. ✅
+
+**Named risk 2 (weights/io.py URL path)** — The net result after both commits is `_IPD_BASE_URL = "https://files.ipd.uw.edu/pub/ligandmpnn"` with filenames `proteinmpnn_v_48_*.pt`. This is the real IPD path per NOTICES.md line 14. The first commit's wrong deviation was corrected by the second commit (7e61f17). ✅
+
+**Named risk 3 (binding_affinity.py `_model_type`)** — No `LigandMPNN` import; helper now returns `"protein_mpnn"` unconditionally. ✅
+
+**Named risk 4 (trainer/cli)** — Hardcoded `ProteinMPNN` everywhere; no dangling references to deleted class or removed config fields. ✅
+
+**Deferred data code** — `include_ligand_atoms`/`atomize_partner_sidechains` in `PPIDataset`, `extract_ligand_atoms`/`extract_sidechain_atoms` in `features.py`, and `Y`/`Y_m`/`Y_t` in `collator.py` are all correctly left in place per the explicit Task 4 deferral. Not a compliance gap.
+
+**Test count** — 290 pass (down from 316). The 26-test reduction is accounted for by deleted LigandMPNN test files/classes. Ruff clean. Mypy clean.
+
+---
+
+## Part 2: Code Quality
+
+### Strengths
+
+1. **Minimal blast radius** — Data layer (`PPIDataset`, `features.py`, `collator.py`) correctly untouched. The cut respects the task boundary precisely.
+
+2. **`_batch.py` cleanup is thorough** — Removed `extract_ligand_atoms`/`extract_sidechain_atoms` imports, all Y/Y_m/Y_t conditionals, and pass-through in `extract_chain_view`. The `model_type` parameter is retained in `load_eval_features` and `build_eval_batch` signatures with appropriate no-op documentation — a defensible API-stability choice.
+
+3. **URL constant introduced** — `_IPD_BASE_URL` in `io.py` is a genuine improvement over repeated string prefixes. The fix commit also adds a clarifying comment (`https://files.ipd.uw.edu/pub/`) that explains the counterintuitive `pub/ligandmpnn` path for ProteinMPNN weights.
+
+4. **`ProteinFeaturesLigand.num_context_atoms → context_k` rename** — Avoids a false positive in the grep verification for Task 4 and is semantically cleaner (`context_k` is already consistent with naming in nearby code). Test updated correspondingly.
+
+5. **Docstring pass is complete** — Every mention of "LigandMPNN" in docstrings across the changed files is updated to neutral or ProteinMPNN-specific language without altering any logic.
+
+### Issues
+
+**Minor — `_batch.py`: `model_type` parameter is now dead code**
+`src/teddympnn/evaluation/_batch.py`, `load_eval_features` and `build_eval_batch` both accept `model_type: str` but the parameter is unused after the simplification. The docstring was updated to say "Must be `protein_mpnn`" and "Unused; kept for API compatibility", which is honest. However, keeping a parameter that does nothing invites future callers to pass `"ligand_mpnn"` and expect behaviour that no longer exists. A `# noqa` or at minimum a runtime assertion (`assert model_type == "protein_mpnn"`) would make the boundary explicit. This is low-severity since the callers inside this codebase pass a hardcoded string, but it is mildly inconsistent with the brief's "ProteinMPNN-only simplification" intent.
+
+**Minor — `_model_type` helper in `binding_affinity.py` is now trivial but retained**
+`_model_type(model)` always returns `"protein_mpnn"` and its `model` parameter is unused. This dead code is harmless but could be inlined away (the brief explicitly offered that: "or inline-remove it and use `ProteinMPNN` directly at its call sites"). Worth cleaning up in Task 4 or opportunistically.
+
+**Minor — `ProteinFeaturesLigand` rename may cause confusion**
+`ProteinFeaturesLigand` is now a dormant class (no live caller since `LigandMPNN` is deleted) with a renamed attribute (`context_k`). Its name still says "Ligand". This is correct per the scope boundary (Task 4 removes data code, not necessarily this layer), but the rename from `num_context_atoms` to `context_k` on a dormant class adds churn that isn't required by the spec. It is benign but should be noted: if Task 4 deletes this class entirely, the rename was unnecessary overhead.
+
+---
+
+## Assessment
+
+**Task quality: Approved**
+
+All required changes are present and correct. The two named correctness risks (config shape, IPD URL) are both verified clean. Tests, ruff, and mypy are all green per the implementer's report, and the diff confirms the changes match the reported state. The minor issues are cosmetic/DX concerns that do not affect correctness or the next task's starting point.</result>
+<usage><subagent_tokens>66713</subagent_tokens><tool_uses>8</tool_uses><duration_ms>70037</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>a4aa09f8e68e2de3a</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/tmp/claude-1001/-home-briney-git-teddympnn/2582a0ca-bf45-41f2-851e-7c4484ebdcff/tasks/a4aa09f8e68e2de3a.output</output-file>
+<status>completed</status>
+<summary>Agent "Implement Task 4: remove dead ligand code" came to rest</summary>
+<note>A task-notification fires each time this agent comes to rest with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>**Status: DONE**
+
+**Commits:**
+- `44b2049` — `data: remove dead ligand featurization and collation`
+- `a4f6d2f` — `models: remove dead LigandMPNN graph-featurization layer`
+
+**Test summary:** 279 passed, 4 warnings (pre-existing lr_scheduler.step() warnings in test_scheduler.py) — down from 290 baseline due to 11 deleted ligand tests.
+
+**Concerns:** None. The verify-before-delete grep on `protein_mpnn.py` returned 0 matches for all deleted model-layer symbols. The broad `grep -rniE "ligand|..."` still hits `src/teddympnn/weights/legacy.py` and `tests/weights/` (checkpoint key remapping tables) and `tests/validation/` (Foundry reference generator), but none of those are in the model-layer or data-layer code paths and are explicitly out of scope.
+
+**Report path:** `/home/briney/git/teddympnn/.superpowers/sdd/task-4-report.md`</result>
+<usage><subagent_tokens>113521</subagent_tokens><tool_uses>74</tool_uses><duration_ms>538112</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>ab396ac7b87ffce6c</task-id>
+<tool-use-id>toolu_01JDhmRmBkEM2KdZccuLoKex</tool-use-id>
+<output-file>/tmp/claude-1001/-home-briney-git-teddympnn/2582a0ca-bf45-41f2-851e-7c4484ebdcff/tasks/ab396ac7b87ffce6c.output</output-file>
+<status>completed</status>
+<summary>Agent "Review Task 4 (spec + quality)" came to rest</summary>
+<note>A task-notification fires each time this agent comes to rest with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>All checks are complete. Here is the review.
+
+---
+
+## Spec Compliance: ✅
+
+All Part A and Part B requirements are fully implemented. Every item in the brief was addressed, every named risk can be verified clean.
+
+---
+
+### Strengths
+
+**Part A — Data branches**
+
+- `features.py` deletions are complete and tightly scoped: `_ELEMENTS`, `NUM_ELEMENT_TYPES`, `UNK_ELEMENT_IDX`, `element_to_idx`, `EXCLUDED_LIGAND_RESIDUES`, `EXCLUDED_IONS`, `extract_ligand_atoms`, `extract_sidechain_atoms` are all gone. The `ATOM_ORDER` import that was only needed by `extract_sidechain_atoms` was also cleaned up — a detail the brief noted but easy to miss.
+- `dataset.py` removal is clean end-to-end: the four constructor params, their `self.*` assignments, the docstring updates, the `_load_features` branch, and the full `__getitem__` ligand-context block are all gone. The `random` import was correctly retained (used by `MixedDataLoader.__iter__`).
+- `collator.py` matches the spec's target snippet exactly: `LIGAND_KEYS` class attribute deleted, `N_max` line deleted, `elif key in self.LIGAND_KEYS:` branch deleted, `B = len(batch)` removed (since it was only needed for the ligand empty-tensor paths), and the `_PAD_VALUES` entries for Y/Y_m/Y_t removed.
+- `sampler.py` docstring reword is model-agnostic as required.
+
+**Part B — Model-layer code**
+
+- `graph_embeddings.py` shrinks from ~630 to ~245 lines. `ProteinFeatures`, `compute_virtual_cb`, `rbf_encode`, `compute_knn` are all intact; verified by grep and diff inspection. Every deleted constant and helper (`NUM_ELEMENT_TYPES`, `NUM_PERIODIC_GROUPS`, `NUM_PERIODIC_PERIODS`, `ATOM_TYPE_EMBED_DIM`, `ATOM_TYPE_OUTPUT_DIM`, `_DEFAULT_CONTEXT_K`, `NUM_ANGLE_FEATURES`, `_ELEMENT_GROUPS`, `_ELEMENT_PERIODS`, `_ELEMENT_INDEX_BY_SYMBOL`, `default_side_chain_atom_types`, `default_periodic_table_groups`, `default_periodic_table_periods`) is gone with no dangling references in any src file.
+- Unused imports (`typing.Any`, `typing.cast`, `torch.nn.functional as F`, `teddympnn.models.tokens.SIDE_CHAIN_ATOM_NAMES`) were cleaned up correctly.
+- `message_passing.py`: only the two ligand-specific docstring lines in `DecLayer` were removed. `EncLayer`, `DecLayer`, `cat_neighbors_nodes`, `gather_edges`, `gather_nodes` are all present and unmodified.
+- `layers/__init__.py`: `ProteinFeaturesLigand` drop from both the import and `__all__` is clean.
+
+**Cross-module safety**
+
+Named risk 2 (lockstep element constant removal) is fully satisfied: `data/features.py` element constants were removed, `models/layers/graph_embeddings.py` atom-type constants were removed, and no remaining file in `src/` imports or references either set. The grep against all `src/teddympnn/` files for `NUM_ELEMENT_TYPES`, `ATOM_TYPE_EMBED_DIM`, etc. returns zero hits.
+
+**Test accounting**
+
+290 → 279 tests is the correct arithmetic (11 deleted: 4 + 1 + 2 + 4). The surviving test classes (`TestProteinFeatures`, `TestUtilities`, `TestPaddingCollator`, `TestPPIDataset`, etc.) are unchanged.
+
+**Deferred items correctly scoped**: `weights/legacy.py`, `tests/weights/`, and `tests/validation/reference_data/generate_foundry_reference.py` were correctly left alone and explained.
+
+---
+
+### Issues
+
+None found. No Critical, Important, or Minor issues.
+
+---
+
+### Minor observation for the controller (not a spec failure)
+
+The `B = len(batch)` variable in `collator.py` was used solely inside the ligand empty-tensor branches. Its removal in the same commit is correct — no other code path in `__call__` referenced `B`. This is already done properly; just noting it for completeness since the brief didn't explicitly call it out.
+
+---
+
+## Assessment: Approved
+
+The implementation is precise, complete, and leaves no dead symbols or dangling cross-module imports. All four named risks are verifiably clean. Verification numbers (279 tests, ruff/mypy green) are consistent with the scope of deletions.</result>
+<usage><subagent_tokens>49521</subagent_tokens><tool_uses>13</tool_uses><duration_ms>69498</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>a5fbb6a9fec0b4135</task-id>
+<tool-use-id>toolu_014XAbRA6nAY6h2hYsmam7y6</tool-use-id>
+<output-file>/tmp/claude-1001/-home-briney-git-teddympnn/2582a0ca-bf45-41f2-851e-7c4484ebdcff/tasks/a5fbb6a9fec0b4135.output</output-file>
+<status>completed</status>
+<summary>Agent "Implement Task 5: trim weight export" came to rest</summary>
+<note>A task-notification fires each time this agent comes to rest with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>**Status:** DONE
+
+**Commit:** `15972fa weights: drop Foundry/legacy export, keep load paths`
+
+**Tests:** 274 passed (279 baseline; removed 9 export tests, added 4 load-path tests; net -5)
+
+**Concerns:** None. `current_to_legacy_*` functions remain defined in `tokens.py` and tested in `tests/models/test_tokens.py` — they are not removed here per task scope, only their import into `legacy.py` was dropped.
+
+**Report:** `/home/briney/git/teddympnn/.superpowers/sdd/task-5-report.md`</result>
+<usage><subagent_tokens>58235</subagent_tokens><tool_uses>36</tool_uses><duration_ms>276717</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>adde9f6aa914e5dab</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/tmp/claude-1001/-home-briney-git-teddympnn/2582a0ca-bf45-41f2-851e-7c4484ebdcff/tasks/adde9f6aa914e5dab.output</output-file>
+<status>completed</status>
+<summary>Agent "Review Task 5 (spec + quality)" came to rest</summary>
+<note>A task-notification fires each time this agent comes to rest with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>All checks complete. Here is the full review:
+
+---
+
+## Spec Compliance: ✅
+
+---
+
+### Strengths
+
+1. **Load paths fully intact.** `load_foundry_checkpoint` in `weights/foundry.py` and `load_legacy_weights` (plus its private helpers `_drop_120th_atom_type`, `_reorder_token_weights`, `_reorder_rbf_weights`, `_rename_key_*`) in `weights/legacy.py` are untouched and functional.
+
+2. **`weights/io.py` unchanged.** The file was not touched at all — all three entry points (`save_checkpoint_bundle`, `load_checkpoint_bundle`, `load_model_weights`) remain intact and still internally dispatch to both `load_foundry_checkpoint` and `load_legacy_weights`.
+
+3. **No dangling references.** Grep confirms zero mentions of `export_foundry_checkpoint`, `convert_to_legacy`, or `_restore_120th_atom_type` anywhere in `src/` or `tests/`.
+
+4. **Import cleanup is surgical.** `legacy.py` drops `current_to_legacy_rbf_permutation` and `current_to_legacy_token_permutation` from its import block, while correctly retaining `legacy_to_current_rbf_permutation`, `legacy_to_current_token_permutation`, and `expand_pair_permutation` — all three of which are actively called in `load_legacy_weights`.
+
+5. **`checkpoints` Typer group correctly fully removed.** Both `checkpoints_app = typer.Typer(...)` and `app.add_typer(checkpoints_app, name="checkpoints")` are gone, and the corresponding CLI tests (`test_checkpoints_help`, `test_checkpoints_export_foundry_help`) are removed from `tests/test_cli.py`. The spec required this and it was done correctly.
+
+6. **`tests/validation/test_foundry_equivalence.py` untouched.** The file still asserts (a) strict `load_state_dict` and (b) forward parity through graph featurization, encoder, and decoder. No export/round-trip assertions existed to remove; nothing was accidentally broken.
+
+7. **New load-path tests are behaviorally meaningful, not vacuous.**
+   - `TestFoundryLoad.test_load_from_model_key`: constructs a real Foundry-format checkpoint on disk, loads it into a fresh model, and compares every key in the state dict with `torch.equal`. This is a genuine behavioral assertion.
+   - `TestFoundryLoad.test_returns_checkpoint_dict`: verifies the return value includes both the `"model"` key and extra metadata — tests the return contract, not just the load side effect.
+   - `TestDropAtomType.test_drop_reduces_dim`: verifies both affected weight shapes reduce from 147→146.
+   - `TestDropAtomType.test_drop_preserves_columns_outside_119`: verifies the column-splice correctness (`[:119]` and `[120:]` mapped to `[:119]` and `[119:]`) — exactly the behavior spec's brief called out.
+   
+   None of the four are mocked or vacuous. None over-engineer beyond replacing lost coverage.
+
+8. **`_rename_key_current_to_legacy` and `_CURRENT_TO_LEGACY_KEY_MAP` / `_CURRENT_SUFFIX_MAP` retained in `legacy.py`.** These are still used by `test_roundtrip_key_rename` in `tests/weights/test_legacy.py`, which tests that key renaming is bidirectionally consistent. Keeping these is correct — they are helpers for the retained `_rename_key_current_to_legacy` function, which is legitimately tested.
+
+---
+
+### Issues
+
+**None (Critical or Important).**
+
+---
+
+### Out-of-Scope Observations (⚠️ Minor — per task brief, not a Task 5 failure)
+
+`current_to_legacy_token_permutation` and `current_to_legacy_rbf_permutation` are now dead in production code. Their only production caller was `convert_to_legacy`, which is gone. They remain defined in `src/teddympnn/models/tokens.py` and are tested in `tests/models/test_tokens.py`, but no production path invokes them. Flag for the controller's final sweep before shipping.
+
+---
+
+### Assessment
+
+**Approved.** The implementation is a clean, precise execution of the spec. All five named risks verified: load paths intact, no dangling references, new tests assert real behavior, foundry equivalence test preserves both weight-load and forward-parity assertions, and the now-empty `checkpoints` Typer group was correctly removed in full. Test delta (279→274: -9 export tests, +4 load-path tests) matches the report. No regressions introduced.</result>
+<usage><subagent_tokens>45736</subagent_tokens><tool_uses>14</tool_uses><duration_ms>68289</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>a9ad01468d07d319b</task-id>
+<tool-use-id>toolu_018woS66vQUSwkp4XbmUrTVQ</tool-use-id>
+<output-file>/tmp/claude-1001/-home-briney-git-teddympnn/2582a0ca-bf45-41f2-851e-7c4484ebdcff/tasks/a9ad01468d07d319b.output</output-file>
+<status>completed</status>
+<summary>Agent "Implement Task 6: weighted loss TDD" came to rest</summary>
+<note>A task-notification fires each time this agent comes to rest with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>Excellent! Everything is correct. Let me create one final summary output:
+
+---
+
+**Status:** ✓ COMPLETE
+
+**Commit:** `7660194` — `training: support per-residue weights in NLL loss`
+
+**Test Summary:** 277 total (274 baseline + 3 new); all passing
+
+**TDD Evidence Confirmed:** Yes
+- RED: `TypeError: forward() got an unexpected keyword argument 'weights'` ✓
+- GREEN: All 8 loss tests pass; full suite 277 pass ✓
+
+**Changes:**
+- `src/teddympnn/training/loss.py` — Added `weights: torch.Tensor | None = None` param, implemented weighted mean semantics
+- `tests/training/test_loss.py` — Added 3 new tests (none/ones/upweighting invariants)
+
+**QA:** ruff check ✓ | ruff format ✓ | mypy ✓ | pytest ✓
+
+**Concerns:** None. Regression invariant verified: constant/None weights reproduce unweighted loss.
+
+**Report:** `/home/briney/git/teddympnn/.superpowers/sdd/task-6-report.md`</result>
+<usage><subagent_tokens>31222</subagent_tokens><tool_uses>24</tool_uses><duration_ms>178929</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>a0a00d75d6bbbf24b</task-id>
+<tool-use-id>toolu_011REYC1v39NX1NBVD4ZRzRF</tool-use-id>
+<output-file>/tmp/claude-1001/-home-briney-git-teddympnn/2582a0ca-bf45-41f2-851e-7c4484ebdcff/tasks/a0a00d75d6bbbf24b.output</output-file>
+<status>completed</status>
+<summary>Agent "Review Task 6 (spec + quality)" came to rest</summary>
+<note>A task-notification fires each time this agent comes to rest with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>**Spec Compliance: APPROVED**
+
+---
+
+## Strengths
+
+1. **Regression invariant is correctly implemented.** The denominator is `weight.sum()` where `weight = mask.float() * weights` (line 65 of diff). With a constant weight `c`, numerator becomes `c * Σ(nll * mask)` and denominator becomes `c * Σ(mask)` — `c` cancels exactly. This is the critical correctness property, and it is satisfied.
+
+2. **`weights=None` path is correctly a no-op.** When `weights is None`, `weight` remains `mask.float()` unchanged (lines 60-62), making the new path bit-for-bit identical to the old code. The first test covers this.
+
+3. **Test 3 is deterministic and non-vacuous.** It constructs logits manually (no random seed needed), sets position 0 to high NLL by design, then asserts `up &gt; base`. The outcome is structurally guaranteed by the setup — position 0 gets weight 5.0 vs 1.0 at positions 1–2, and position 0 has the highest NLL by construction. This is the correct pattern for a deterministic behavioral test.
+
+4. **TDD evidence is genuine.** The RED phase shows `TypeError: LabelSmoothedNLLLoss.forward() got an unexpected keyword argument 'weights'` — exactly what the spec required. The GREEN phase reports 8 tests passing (5 pre-existing + 3 new), consistent with a real run.
+
+5. **DDP path is consistent.** Both `numerator` and `denominator` are all-reduced before division (lines 68-70). This is the correct pattern — reducing both scalars before dividing preserves the weighted-mean semantics across workers.
+
+6. **Pre-existing tests preserved and not weakened.** The 5 existing tests in `TestLabelSmoothedNLLLoss` are untouched in the diff. The report shows all 5 still pass.
+
+7. **`weights.to(weight.dtype)` handles mixed precision.** If the caller passes a different float dtype, the cast keeps the computation coherent rather than letting PyTorch broadcast-cast silently.
+
+---
+
+## Issues
+
+None critical. One minor observation:
+
+**Minor — `denominator.clamp(min=1.0)` was pre-existing, not new.** This is carried forward from the original implementation, which is correct. However, the `clamp` operates on the potentially all-reduced denominator. In DDP, the reduced denominator will always be ≥ the single-GPU value, so the clamp only fires at the degenerate case of all masks being zero. This is acceptable and consistent with prior behavior.
+
+---
+
+## Assessment
+
+**Task quality: Approved.**
+
+The implementation matches the spec exactly. The math is correct, the regression invariant holds analytically, all three tests are meaningful and non-vacuous, TDD red/green evidence is genuine, and the DDP path handles both scalars consistently. No issues require fixes.</result>
+<usage><subagent_tokens>22386</subagent_tokens><tool_uses>3</tool_uses><duration_ms>22244</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>a1a738bebe804a3c1</task-id>
+<tool-use-id>toolu_01HGpJb7A2GzuZjnbLbVgeAr</tool-use-id>
+<output-file>/tmp/claude-1001/-home-briney-git-teddympnn/2582a0ca-bf45-41f2-851e-7c4484ebdcff/tasks/a1a738bebe804a3c1.output</output-file>
+<status>completed</status>
+<summary>Agent "Implement Task 7: wire interface CE" came to rest</summary>
+<note>A task-notification fires each time this agent comes to rest with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>---
+
+**Status:** COMPLETE
+
+**Commit:** `5c9aa18` — `training: interface-weighted cross-entropy via config knob`
+
+**Test summary:** 280 passed (up from 277), 4 pre-existing warnings, 0 failures. ruff check clean, mypy clean.
+
+**Concerns:** None. The `test_trainer.py` `_make_batch` helper also needed `interface_residue_mask` added (not mentioned in the brief) — 6 tests would have failed without that fix.
+
+**Report path:** `/home/briney/git/teddympnn/.superpowers/sdd/task-7-report.md` (gitignored by `.superpowers/`, written but not committed)</result>
+<usage><subagent_tokens>66184</subagent_tokens><tool_uses>42</tool_uses><duration_ms>313744</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>adc29a0b547cec89a</task-id>
+<tool-use-id>toolu_01AR5W4ophHUnTWTKbrPDUTJ</tool-use-id>
+<output-file>/tmp/claude-1001/-home-briney-git-teddympnn/2582a0ca-bf45-41f2-851e-7c4484ebdcff/tasks/adc29a0b547cec89a.output</output-file>
+<status>completed</status>
+<summary>Agent "Review Task 7 (spec + quality)" came to rest</summary>
+<note>A task-notification fires each time this agent comes to rest with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>I now have a complete picture. Here is my review:
+
+---
+
+## Spec Compliance: APPROVED (with one minor gap noted)
+
+---
+
+### Strengths
+
+1. **Regression invariant is algebraically exact.** The formula `1.0 + (interface_weight - 1.0) * mask.float()` with the default `interface_weight=1.0` produces `1.0 + 0.0 * mask = 1.0` for every element regardless of the mask value. The math is correct and the default is 1.0 in both `config.py` and `configs/train.yaml`.
+
+2. **All six spec-mandated file changes are present and correct.**
+   - `dataset.py`: mask computed on `res_mask`-selected residues, zeros-initialized, scattered back — exactly matches the spec template.
+   - `collator.py`: key appears in both `_PAD_VALUES` (False) and `RESIDUE_KEYS` frozenset; L-dimension padding is correct.
+   - `config.py`: `interface_weight: float = 1.0` added after `label_smoothing` with the correct comment.
+   - `trainer.py`: weights built and passed in **both** `train_step` and `validate`; on-the-fly `identify_interface_residues` call in `validate` removed and replaced with `batch["interface_residue_mask"][b].bool()`; the now-unused import is removed.
+   - `configs/train.yaml`: knob documented near `label_smoothing` with upweighting comment.
+
+3. **Pre-existing `identify_interface_residues` use in `_get_structure_metadata` is untouched.** The diff correctly leaves the metadata-counting call (lines 177-182 of `dataset.py`) intact. There is no duplication or breakage of the min-interface-contacts filter path.
+
+4. **`test_trainer.py` `_make_batch` fix is minimal and correct.** Adding `"interface_residue_mask": torch.zeros(B, L, dtype=torch.bool, device=device)` is exactly what is needed — the trainer now indexes this key in `train_step`, so existing trainer tests would have crashed without it. Shape `(B, L)`, dtype `bool`, all-zeros (no interface) is the right minimal addition; it does not mask a real problem.
+
+5. **Data tests are tight.** `test_getitem_includes_interface_mask` checks dtype and shape against `sample["S"]`. `test_collate_pads_interface_mask` checks shape `(2, 6)`, dtype, and that the padded positions are False — exactly the assertions the spec prescribes.
+
+6. **Validation interface-recovery semantics are preserved.** The old code built `full_interface` by re-running `identify_interface_residues` on valid residues and scattering back into `zeros_like(res_mask)` — producing the same `(L,)` bool. The new code reads `batch["interface_residue_mask"][b].bool()`, which was computed the same way in `dataset.py`. Semantics are identical; redundant per-batch computation eliminated.
+
+---
+
+### Issues
+
+**Minor — Missing explicit regression-invariant e2e test (spec step 9)**
+
+The brief states: *"Keep an assertion (or add one) that with `interface_weight=1.0` the run still trains — this guards the regression invariant end to end."* The new test `test_interface_weight_produces_finite_loss` only exercises `interface_weight=3.0`. The pre-existing `test_training_loop_synthetic` implicitly covers `interface_weight=1.0` (it uses the default config, which defaults to 1.0, and now includes `interface_residue_mask` in the synthetic batches), but it does so silently — there is no assertion or comment explicitly labeling it as the regression-invariant guard. The spec asked for an explicit, named assertion.
+
+This is minor because the invariant is covered implicitly (all-ones weights → standard CE loss → same test behavior as before), but a future reader or CI triage won't immediately see "this is the 1.0-invariant test."
+
+**Minor — `test_interface_weight_produces_finite_loss` does not exercise the `validate` path**
+
+The new test only calls `trainer.train_step(batch)`. The validate path has its own `weights` construction that is now required to work correctly. The existing test infrastructure doesn't seem to exercise validation with `interface_weight=3.0`. This is a low-severity gap since the formula is copy-pasted identically and both are in the same method, but a test of `trainer.validate()` with an upweighted config would provide stronger assurance.
+
+---
+
+### Assessment
+
+**Task quality: Approved**
+
+All six spec-mandated changes are correctly implemented. The regression invariant is algebraically guaranteed by the formula and the 1.0 default. Existing tests are correctly updated. The two minor gaps — no explicit `interface_weight=1.0` e2e label and no validate-path coverage in the new test — do not represent functional defects and do not require blocking fixes. The implementation can be merged as-is.</result>
+<usage><subagent_tokens>37590</subagent_tokens><tool_uses>17</tool_uses><duration_ms>75554</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>adc45509cb0731c23</task-id>
+<tool-use-id>toolu_01UbhaU8xbLZJ1sLSMb7wDLw</tool-use-id>
+<output-file>/tmp/claude-1001/-home-briney-git-teddympnn/2582a0ca-bf45-41f2-851e-7c4484ebdcff/tasks/adc45509cb0731c23.output</output-file>
+<status>completed</status>
+<summary>Agent "Implement Task 8: docs cleanup" came to rest</summary>
+<note>A task-notification fires each time this agent comes to rest with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>**Status:** Complete.
+
+**Commit:** `c7876ba` — `docs: refocus README and architecture docs on the fine-tune` (5 files, 154 insertions, 2247 deletions)
+
+**pytest:** 280 passed, 4 warnings — green, no regressions.
+
+**Concerns:** `docs/TESTING.md` still mentions `ligandmpnn_*.pt` reference data files — deliberate survivor from the test-infra docs, not user-facing; flagged in the report for a future cleanup pass. All matches in `VISION.md` and `docs/superpowers/plans/` are intentional (non-goals listing and historical plan). Zero stale references in `README.md`, `CLAUDE.md`, or `ARCHITECTURE.md`.
+
+**Report:** `/home/briney/git/teddympnn/.superpowers/sdd/task-8-report.md`</result>
+<usage><subagent_tokens>52252</subagent_tokens><tool_uses>25</tool_uses><duration_ms>239490</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>aa12199f6399fa4eb</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/tmp/claude-1001/-home-briney-git-teddympnn/2582a0ca-bf45-41f2-851e-7c4484ebdcff/tasks/aa12199f6399fa4eb.output</output-file>
+<status>completed</status>
+<summary>Agent "Review Task 8 (docs)" came to rest</summary>
+<note>A task-notification fires each time this agent comes to rest with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>All flags verified. Now I have a complete picture. Let me deliver the verdict.
+
+---
+
+## Spec Compliance: PASSED
+
+**All five spec requirements are satisfied.** The implementation is clean, accurate, and delivers exactly what Task 8 asked for.
+
+---
+
+### Strengths
+
+1. **Correct deletions.** `docs/WORKPLAN.md` and `docs/TECHNICAL_ANALYSIS.md` are gone. `docs/VISION.md` is untouched. No false positives.
+
+2. **README CLI is accurate.** Every command example was verified against `--help`:
+   - `python -m teddympnn score --checkpoint ... --pdb ... --chains ... --num-samples N` — exact match.
+   - `python -m teddympnn evaluate recovery --checkpoint ... --data ...` — exact match (no `--model-type`).
+   - `python -m teddympnn evaluate ddg --checkpoint ... --skempi ... --num-samples N` — exact match.
+   - `python -m teddympnn train`, `--resume`, Hydra overrides — exact match.
+   - `python -m teddympnn download teddymer --output ...` and `prepare-manifests --teddymer ... --val-fraction ...` — exact match.
+   - The `nvidia-complexes` download subcommand is gone; `evaluate benchmark` is gone; `checkpoints export-foundry` is gone; `--model-type` is gone.
+
+3. **Zero stale references in the three target files.** A live `grep` for `ligand|nvidia|benchmark|export-foundry|convert_to_legacy` against `README.md`, `CLAUDE.md`, and `docs/ARCHITECTURE.md` returns nothing.
+
+4. **ARCHITECTURE.md is internally consistent with VISION.md.** The VISION.md pointer is the first line. The content (ProteinMPNN-only, teddymer, interface-weighted CE, SKEMPI eval, load-only weight I/O) directly mirrors VISION.md's scope and non-goals. Removed: LigandMPNN, NVIDIA data, benchmark, Foundry export, DDP claims, the full `TrainingConfig` schema dump.
+
+5. **CLAUDE.md Architecture section is accurate and useful.** The five-sentence summary correctly describes the model (3+3 layers, 128-dim, k=48, ~1.66M params), training objective (`interface_weight` knob), dataset (teddymer), evaluation (recovery + SKEMPI), and pointers to both docs files. The install extras line (`[dev]` in Quick Reference, with `[dev,data,train]` explained in README) is consistent with `pyproject.toml` which defines exactly `dev`, `data`, and `train` optional dependencies.
+
+6. **install extras match pyproject.toml.** `pyproject.toml` defines `dev` (pytest/ruff/mypy), `data` (aiohttp/zstandard), `train` (wandb). README description of what each adds is accurate.
+
+---
+
+### Issues
+
+**Minor — ARCHITECTURE.md package tree omits `weights/legacy.py`** (`docs/ARCHITECTURE.md`, Package Structure section, line ~203): The tree shows only `io.py` and `foundry.py` under `weights/`, but `legacy.py` still exists on disk. This is a docs/reality mismatch but does not misrepresent the system's capabilities — `legacy.py` supports legacy-format loading which is correctly described in the Weight I/O section. The file may be a leftover from the simplification refactor (a code concern from earlier tasks), not something Task 8 introduced. No action required to approve Task 8.
+
+**Minor — ARCHITECTURE.md package tree omits `splits.py` and `tokens.py`** (`docs/ARCHITECTURE.md`, Package Structure): `src/teddympnn/data/splits.py` and `src/teddympnn/models/tokens.py` exist but aren't listed under their respective directories. Omitting them is defensible (abbreviated listing), but the tree could mislead a reader about what's actually there. Very low impact.
+
+**Noted (deferred per brief) — `docs/TESTING.md` mentions `ligandmpnn_*.pt`**: Implementer correctly identified this and deferred it. Not a Task 8 failure.
+
+---
+
+### Assessment
+
+**Approved.** The implementation is accurate, complete, and well-executed. All five spec requirements pass. CLI examples are verified against the live `--help` output. Zero stale references in the target files. The two minor package-tree omissions are cosmetic and do not misrepresent the system. The task's primary job — purging stale design-era content and aligning docs to the actual fine-tune-only scope — is done correctly.</result>
+<usage><subagent_tokens>59665</subagent_tokens><tool_uses>26</tool_uses><duration_ms>97449</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>aa1753718c86d278e</task-id>
+<output-file>/tmp/claude-1001/-home-briney-git-teddympnn/2582a0ca-bf45-41f2-851e-7c4484ebdcff/tasks/aa1753718c86d278e.output</output-file>
+<status>completed</status>
+<summary>Agent "Implement Task 9: dead-code sweep + verify" came to rest</summary>
+<note>A task-notification fires each time this agent comes to rest with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>Confirmed green. That's 274 dots (4 rows: 72+72+72+58 = 274), exit code 0, no failures. The warnings summary was the only thing suppressing the count line in earlier truncated output.
+
+Task 9 is complete and verified. The fork agent's work holds up under independent re-verification.
+
+## Status: COMPLETE
+
+**Commits (on `refactor/simplify`):**
+- `aa44da2` chore: drop bundled LigandMPNN weights and dead reference data
+- `82cd76f` weights: remove dead legacy-export conversion code
+- `30347eb` evaluation: drop unused model_type plumbing
+- `bf300f7` test: add explicit interface_weight=1.0 regression guard
+- `24598b4` chore: clean up remaining LigandMPNN reference in download script docstring
+
+**Final verification (re-run independently):** `ruff format --check` clean, `ruff check` clean (all checks passed), `mypy src/` clean (no issues in 34 files), `pytest` green (274 passed, exit code 0). The only remaining warnings are the pre-existing `lr_scheduler.step()` ones in `test_scheduler.py` (not in scope).
+
+**Items left undone/reverted:** None. All 11 items completed. Note: the reference-data `.pt` files (Item 2) were untracked/gitignored, so they were removed with `rm -f` rather than `git rm`.
+
+**Report:** `/home/briney/git/teddympnn/.superpowers/sdd/task-9-report.md`
+
+The suite ends green, completing the simplification refactor.</result>
+<usage><subagent_tokens>25499</subagent_tokens><tool_uses>11</tool_uses><duration_ms>1163433</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>a88d0840f4d60de3f</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/tmp/claude-1001/-home-briney-git-teddympnn/2582a0ca-bf45-41f2-851e-7c4484ebdcff/tasks/a88d0840f4d60de3f.output</output-file>
+<status>completed</status>
+<summary>Agent "Review Task 9 (spec + quality)" came to rest</summary>
+<note>A task-notification fires each time this agent comes to rest with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>All checks complete. Here is the review verdict:
+
+---
+
+## Spec Compliance: APPROVED
+
+All seven named risks verified clean. No blockers, no important issues. One minor observation.
+
+---
+
+## Strengths
+
+**Legacy LOAD path fully intact (Risk 1).** `load_legacy_weights`, `legacy_to_current_token_permutation`, `legacy_to_current_rbf_permutation`, and `expand_pair_permutation` are all present and unchanged in `legacy.py` and `tokens.py`. The `_drop_120th_atom_type` non-ligand branch is preserved exactly. The legacy load test class in `tests/weights/test_legacy.py` retains `TestKeyRenaming`, `TestTokenReordering`, `TestRBFReordering`, and `TestDropAtomType` — all exercising the load path.
+
+**No dangling references (Risk 2).** Grep for `current_to_legacy*`, `_rename_key_current_to_legacy`, `_CURRENT_TO_LEGACY_KEY_MAP`, `_CURRENT_SUFFIX_MAP` across `src/` and `tests/` returns zero hits. Clean excision.
+
+**`_batch.py` model_type removal complete (Risk 3).** Both `load_eval_features` and `build_eval_batch` signatures no longer have `model_type`. All eight `build_eval_batch` call sites in `binding_affinity.py` are updated; both test call sites in `test_binding_affinity.py` are updated. `skempi.py` does not call these functions directly (it goes through `predict_ddg`). Zero residual `model_type=` keyword arguments anywhere.
+
+**`binding_affinity._model_type` inline (Risk 4).** The `_model_type` helper is gone. Both call sites (`score_complex` line 223, `predict_ddg` line 315) now call `load_eval_features(structure_path)` directly, with `model_type=model_type` correctly dropped from the downstream `build_eval_batch` calls.
+
+**PACKAGED_WEIGHTS / default_pretrained_weights (Risk 5).** `pretrained/__init__.py` contains only `{"protein_mpnn": "proteinmpnn_v_48_020.pt"}`. The `pretrained/` directory contains only `proteinmpnn_v_48_020.pt`, `NOTICES.md`, `__init__.py`, and `__pycache__`. The deleted binary is gone from disk and from all index maps.
+
+**`io.py` `_IPD_BASE_URL` preserved (Risk 6).** Line 26 reads `_IPD_BASE_URL = "https://files.ipd.uw.edu/pub/ligandmpnn"` — untouched, as specified.
+
+**Regression guard test (Risk 7).** The test at `tests/training/test_e2e_training.py:338` makes a real assertion: it calls `LabelSmoothedNLLLoss` twice — once with `weights=torch.ones(B, L)` (simulating `interface_weight=1.0`) and once with `weights=None` (standard CE) — and asserts `torch.allclose(..., atol=1e-6)`. This is substantive: the loss implementation computes `weight = mask.float() * weights` vs `weight = mask.float()`, so when weights are all-ones the numerator and denominator are identical in both paths. The invariant is real and the assertion will catch any future breakage of the weighting code.
+
+---
+
+## Issues
+
+### Minor
+
+**`tests/validation/reference_data/generate_foundry_reference.py` still references `brineylab/ligandmpnn:latest` in the Docker command comment** (lines 4 and 10). The report flags this as acceptable because it's the literal published Docker image name and the file is gitignored. This is correct — the image name cannot be changed — but it means the gitignored script still has a functional `LigandMPNN` import block if any reader checks the copy on disk. The spec explicitly calls out this file as gitignored and the diff shows the git-tracked `scripts/generate_foundry_reference.py` was correctly cleaned. Not a code defect; documentation-level noise only.
+
+**`_drop_120th_atom_type` docstring still says "Affects embedding weights that have atom type as input dim"** (plural, `weights`). After the simplification it only handles one key. The docstring is slightly stale. Not a bug.
+
+---
+
+## Assessment
+
+**Task quality: Approved.** All Group A–D items were executed correctly. The legacy LOAD path is untouched, all export-direction dead code is gone without exception, callers are consistently updated, the pretrained binary is removed from both disk and all registries, `_IPD_BASE_URL` is preserved, and the regression guard test makes a real, meaningful assertion. The 274-test suite passing with ruff/mypy clean is the expected end state.</result>
+<usage><subagent_tokens>53629</subagent_tokens><tool_uses>21</tool_uses><duration_ms>91949</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>a8f1c94968b36f332</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/tmp/claude-1001/-home-briney-git-teddympnn/2582a0ca-bf45-41f2-851e-7c4484ebdcff/tasks/a8f1c94968b36f332.output</output-file>
+<status>completed</status>
+<summary>Agent "Final whole-branch code review" came to rest</summary>
+<note>A task-notification fires each time this agent comes to rest with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>NOTICES.md correctly attributes ProteinMPNN. The `.../pub/ligandmpnn/` URL is the real IPD distribution path (where ProteinMPNN weights are co-hosted), so it's accurate. Minor stale phrasing: "Both upstream repositories" (line 27) implies two repos but only one (ProteinMPNN) is now listed — a cosmetic leftover.
+
+I have a complete picture. The refactor is thorough and correct. Let me compile the final review.
+
+---
+
+### Strengths
+
+- **Regression invariant is genuinely guarded and verified.** I numerically confirmed `interface_weight=1.0` produces a bit-identical loss to standard CE (`3.639899730682373` both ways), and constant weights are invariant. The invariant is guarded at two levels: `tests/training/test_loss.py:93-114` (loss unit) and `tests/training/test_e2e_training.py:338-385` (end-to-end through the trainer's exact `weights = 1 + (iw-1)*mask` construction).
+- **Clean deletions, no half-wired paths in the hot loop.** The benchmark harness, NVIDIA source, LigandMPNN model+data, dead element/atom-type constants, and the `ProteinFeaturesLigand` layer are all gone with no dangling imports. Dead-reference sweep across `src/tests/scripts/configs` is clean except for legitimate English-word/URL matches.
+- **Interface-mask flow is coherent and behavior-preserving.** `dataset.py:253-261` computes the mask on valid residues (8.0 Å cutoff) and scatters back; `collator.py` pads with `False`; `trainer.py` consumes it identically in `train_step` and `validate`. The trainer's old on-the-fly interface recompute (`identify_interface_residues`, also 8.0 Å) was replaced by the dataset mask — numerically equivalent, so the `val_interface_recovery` metric does not drift.
+- **Weight I/O is correctly load-only and the legacy path stays coherent.** `legacy.py` keeps exactly the three permutation imports the load path uses (`expand_pair_permutation`, `legacy_to_current_{rbf,token}_permutation`); the key-map pruning kept the graph-featurization renames needed for load. The Foundry-equivalence test still asserts strict weight load + forward parity through `log_probs` (atol 5e-5), and its reference `.pt` files exist on disk so it actually runs (not silently skipped).
+- **Config/CLI match VISION exactly.** `ModelType = Literal["protein_mpnn"]`, `SourceType = Literal["teddymer", "pdb"]`, `interface_weight: float = 1.0` knob, 3-command CLI (`train`/`score`/`evaluate {recovery,ddg}`) plus retained `download` helpers, no `checkpoints`/benchmark/nvidia/export commands.
+
+### Issues
+
+#### Critical (Must Fix)
+None.
+
+#### Important (Should Fix)
+None. (The default `interface_weight=1.0` preserves current behavior, the architecture is untouched, and all load/eval surfaces are intact. Nothing blocks merge.)
+
+#### Minor (Nice to Have)
+- **`src/teddympnn/evaluation/_batch.py:84,94` — dead `include_partner_sidechains` parameter.** `build_eval_batch` keeps `include_partner_sidechains: bool = True` documented as "Unused; kept for API compatibility," but a grep shows **no caller anywhere in src or tests** passes it. It's a leftover seam from the removed LigandMPNN partner-sidechain-atomization path, and `_batch.py` is an internal module (leading underscore) with no external API to preserve. *Why it matters:* it's exactly the "half-wired path left behind by the deletion" this review targets, and the plan's Task 9 was a dead-code sweep. *Fix:* delete the parameter and its docstring line.
+- **`src/teddympnn/weights/io.py:1-6,46-68 — vestigial export-era language and `compatibility` metadata.** The module docstring still says the bundle "stores model state alongside compatibility metadata needed for export to other ecosystems (Foundry, legacy dauparas repos)," and `save_checkpoint_bundle` still writes a `compatibility` block (token/rbf/atom ordering) — both artifacts of the removed export path. *Why it matters:* misleads a new reader into thinking export still exists (VISION explicitly drops it). Harmless functionally (load path ignores it). *Fix:* reword the docstring to "native checkpoints (model + optimizer + scheduler + step)"; optionally drop the `compatibility` field if nothing reads it.
+- **`scripts/generate_foundry_reference.py:4,10 — stale LigandMPNN docker reference in a *tracked* file.** The triage note flagged only the gitignored `tests/.../generate_foundry_reference.py` copy, but this `scripts/` copy is tracked (`git ls-files` confirms) and still references the `brineylab/ligandmpnn:latest` container in its docstring. Cosmetic, but it's a tracked stale reference. *Fix:* update or delete the comment.
+- **`src/teddympnn/weights/pretrained/NOTICES.md:27` — "Both upstream repositories" but only one is listed** now that LigandMPNN is gone. Cosmetic. (The `.../pub/ligandmpnn/` URL on line 13 is the *correct* real IPD distribution path for ProteinMPNN weights and should stay.)
+- (Already-triaged, no action needed) `docs/ARCHITECTURE.md` omits `weights/legacy.py`/`data/splits.py`/`models/tokens.py` from its tree; the e2e `interface_weight=3.0` test exercises only `train_step` (the `validate` weights construction is identical and separately covered by the loss-level tests).
+
+### Recommendations
+- Sweep the four Minor items in a single follow-up commit (`chore: final dead-code/doc sweep`) — none block merge. The `_batch.py` parameter is the only one touching code.
+- Optional: add one tiny test that drives `Trainer.validate()` with a `val_loader` and `interface_weight=1.0` vs `3.0` on a fixed batch, to close the noted gap that no current test exercises the validate path's weights construction. Low priority since it's textually identical to the train path.
+
+### Assessment
+**Ready to merge? Yes.** The refactor faithfully matches VISION's keep/simplify/delete table, the regression invariant is numerically exact and double-guarded, the legacy weight-load and forward-parity tests remain intact and runnable, and the interface mask flows correctly dataset → collator → trainer. The only findings are cosmetic/dead-code nits (chief among them an unused `include_partner_sidechains` parameter in the internal `_batch.py`) that can be cleaned up in a trivial follow-up and do not affect correctness or the 274-test green suite.</result>
+<usage><subagent_tokens>115710</subagent_tokens><tool_uses>34</tool_uses><duration_ms>197675</duration_ms></usage>
+</task-notification>
+
+---
+
+<task-notification>
+<task-id>a34b40c9dd1c4aaf9</task-id>
+<tool-use-id>REDACTED</tool-use-id>
+<output-file>/tmp/claude-1001/-home-briney-git-teddympnn/2582a0ca-bf45-41f2-851e-7c4484ebdcff/tasks/a34b40c9dd1c4aaf9.output</output-file>
+<status>completed</status>
+<summary>Agent "Final dead-code/doc sweep fix" came to rest</summary>
+<note>A task-notification fires each time this agent comes to rest with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>**Status:** Done.
+
+**Commit:** `204bf07` — `chore: final dead-code and doc sweep`
+
+**Grep:** `grep -rn "include_partner_sidechains" src/ tests/` — only the two definition-site lines in `_batch.py` (parameter + docstring), zero external callers.
+
+**test_binding_affinity:** `18 passed` (covering test for item 1)  
+**Full suite:** `274 passed, 4 warnings` — baseline unchanged. ruff + mypy clean.
+
+**All 5 items done.** No items skipped. Report appended to `.superpowers/sdd/task-9-report.md` (gitignored — written to disk only).</result>
+<usage><subagent_tokens>38117</subagent_tokens><tool_uses>23</tool_uses><duration_ms>180843</duration_ms></usage>
+</task-notification>
+
+---
+
+the PR is failing the type check on github CI. may have beeen something pre-existing or maybe a version mismatxh between the local and github environments.
