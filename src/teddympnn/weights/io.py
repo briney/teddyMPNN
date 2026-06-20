@@ -23,12 +23,14 @@ logger = logging.getLogger(__name__)
 FORMAT_VERSION = "teddympnn.v1"
 
 # Pretrained checkpoint URLs from IPD (https://files.ipd.uw.edu/pub/)
+_IPD_BASE_URL = "https://files.ipd.uw.edu/pub/ligandmpnn"
+
 PRETRAINED_URLS: dict[str, dict[str, str]] = {
     "protein_mpnn": {
-        "002": "https://files.ipd.uw.edu/pub/proteinmpnn/proteinmpnn_v_48_002.pt",
-        "010": "https://files.ipd.uw.edu/pub/proteinmpnn/proteinmpnn_v_48_010.pt",
-        "020": "https://files.ipd.uw.edu/pub/proteinmpnn/proteinmpnn_v_48_020.pt",
-        "030": "https://files.ipd.uw.edu/pub/proteinmpnn/proteinmpnn_v_48_030.pt",
+        "002": f"{_IPD_BASE_URL}/proteinmpnn_v_48_002.pt",
+        "010": f"{_IPD_BASE_URL}/proteinmpnn_v_48_010.pt",
+        "020": f"{_IPD_BASE_URL}/proteinmpnn_v_48_020.pt",
+        "030": f"{_IPD_BASE_URL}/proteinmpnn_v_48_030.pt",
     },
 }
 
