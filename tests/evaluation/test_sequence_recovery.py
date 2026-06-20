@@ -165,13 +165,13 @@ class TestComputeRecovery:
         batches = []
         for i in range(4):
             b = _make_batch(B=2, L=20)
-            b["source"] = ["teddymer", "nvidia"] if i % 2 == 0 else ["pdb", "teddymer"]
+            b["source"] = ["teddymer", "pdb"] if i % 2 == 0 else ["pdb", "teddymer"]
             batches.append(b)
         loader = DataLoader(batches, batch_size=None)
 
         results = compute_recovery(model, loader, device=torch.device("cpu"))
 
-        assert set(results.per_source_overall) == {"teddymer", "nvidia", "pdb"}
+        assert set(results.per_source_overall) == {"teddymer", "pdb"}
         # Perfect model → every per-source overall recovery is 1.0
         for value in results.per_source_overall.values():
             assert value == 1.0

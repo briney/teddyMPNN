@@ -43,7 +43,7 @@ class RecoveryResults:
         n_interface_residues: Total interface residues scored.
         size_bin_recoveries: Interface recovery stratified by interface size bin.
         per_source_overall: Designed-residue recovery stratified by dataset
-            source (e.g. ``"teddymer"``, ``"nvidia"``, ``"pdb"``). Empty if
+            source (e.g. ``"teddymer"``, ``"pdb"``). Empty if
             the loader did not provide a ``source`` field.
         per_source_interface: Interface recovery stratified by dataset source.
     """

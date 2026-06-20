@@ -35,11 +35,6 @@ class TestCLIHelp:
         result = runner.invoke(app, ["download", "teddymer", "--help"])
         assert result.exit_code == 0
 
-    def test_download_nvidia_help(self) -> None:
-        """download nvidia-complexes --help works."""
-        result = runner.invoke(app, ["download", "nvidia-complexes", "--help"])
-        assert result.exit_code == 0
-
     def test_download_prepare_manifests_help(self) -> None:
         """download prepare-manifests --help works."""
         result = runner.invoke(app, ["download", "prepare-manifests", "--help"])

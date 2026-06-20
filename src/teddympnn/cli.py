@@ -88,42 +88,12 @@ def teddymer(
         typer.echo(f"Failures: {result.failures_path} ({result.failures})")
 
 
-@download_app.command("nvidia-complexes")
-def nvidia_complexes(
-    output: Annotated[Path, typer.Option(help="Output directory.")] = Path("data/nvidia_complexes"),
-    min_ipsae: Annotated[float, typer.Option(help="Min ipSAE score.")] = 0.6,
-    min_plddt: Annotated[float, typer.Option(help="Min average pLDDT.")] = 70.0,
-    max_clashes: Annotated[int, typer.Option(help="Max backbone clashes.")] = 10,
-) -> None:
-    """Download and filter NVIDIA predicted complexes."""
-    from teddympnn.data.nvidia_complexes import (
-        download_nvidia_chunks,
-        download_nvidia_metadata,
-        extract_nvidia_structures,
-        filter_nvidia_metadata,
-    )
-
-    csv_path = download_nvidia_metadata(output / "metadata")
-    manifest_path = output / "filtered_manifest.tsv"
-    filter_nvidia_metadata(
-        csv_path,
-        manifest_path,
-        min_ipsae=min_ipsae,
-        min_plddt=min_plddt,
-        max_clashes=max_clashes,
-    )
-    download_nvidia_chunks(manifest_path, output / "chunks")
-    extract_nvidia_structures(manifest_path, output / "chunks", output / "structures")
-    typer.echo(f"NVIDIA complexes data prepared in {output}")
-
-
 @download_app.command("prepare-manifests")
 def prepare_manifests_cmd(
     output: Annotated[Path, typer.Option(help="Output directory for manifests.")] = Path(
         "data/manifests"
     ),
     teddymer: Annotated[Path | None, typer.Option(help="Teddymer filtered manifest.")] = None,
-    nvidia: Annotated[Path | None, typer.Option(help="NVIDIA filtered manifest.")] = None,
     pdb: Annotated[Path | None, typer.Option(help="PDB complexes manifest.")] = None,
     val_fraction: Annotated[float, typer.Option(help="Validation fraction.")] = 0.05,
     seed: Annotated[int, typer.Option(help="Random seed for splitting.")] = 42,
@@ -134,7 +104,6 @@ def prepare_manifests_cmd(
     train_path, val_path = prepare_manifests(
         output,
         teddymer_manifest=teddymer,
-        nvidia_manifest=nvidia,
         pdb_manifest=pdb,
         val_fraction=val_fraction,
         seed=seed,

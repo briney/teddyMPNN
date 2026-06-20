@@ -1,7 +1,7 @@
 """Unified PPI dataset with partner-design view expansion.
 
-``PPIDataset`` loads structures from any of the three data sources (teddymer,
-NVIDIA complexes, PDB experimental) and expands each two-partner complex into
+``PPIDataset`` loads structures from any of the two data sources (teddymer,
+PDB experimental) and expands each two-partner complex into
 two partner-design training views.
 """
 

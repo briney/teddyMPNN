@@ -1,5 +1,5 @@
 # Default training config: ProteinMPNN fine-tuning on the full data mix
-# (60/20/20 teddymer/nvidia/pdb).
+# (80/20 teddymer/pdb).
 #
 # Architecture, pretrained_weights, and the model-tuned training knobs
 # (token_budget, structure_noise, grad_clip_max_norm) are intentionally unset
@@ -13,20 +13,14 @@ data:
   train:
     teddymer:
       path: data/manifests/train_teddymer.tsv
-      ratio: 0.60
-    nvidia:
-      path: data/manifests/train_nvidia.tsv
-      ratio: 0.20
+      ratio: 0.80
     pdb:
       path: data/manifests/train_pdb.tsv
       ratio: 0.20
   validation:
     teddymer:
       path: data/manifests/val_teddymer.tsv
-      ratio: 0.60
-    nvidia:
-      path: data/manifests/val_nvidia.tsv
-      ratio: 0.20
+      ratio: 0.80
     pdb:
       path: data/manifests/val_pdb.tsv
       ratio: 0.20

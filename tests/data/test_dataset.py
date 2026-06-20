@@ -179,16 +179,16 @@ class TestPerSourceManifestContract:
         manifest_path = tmp_path / "manifest_per_source.tsv"
         df = pd.DataFrame(
             {
-                "structure_path": [str(PDB_1BRS), str(PDB_1BRS), str(PDB_1BRS)],
-                "chain_A": ["A", "A", "A"],
-                "chain_B": ["D", "D", "D"],
-                "source": ["teddymer", "nvidia", "pdb"],
+                "structure_path": [str(PDB_1BRS), str(PDB_1BRS)],
+                "chain_A": ["A", "A"],
+                "chain_B": ["D", "D"],
+                "source": ["teddymer", "pdb"],
             }
         )
         df.to_csv(manifest_path, sep="\t", index=False)
         return manifest_path
 
-    @pytest.mark.parametrize("source", ["teddymer", "nvidia", "pdb"])
+    @pytest.mark.parametrize("source", ["teddymer", "pdb"])
     def test_first_item_has_nonempty_partner_masks(
         self,
         per_source_manifest: Path,

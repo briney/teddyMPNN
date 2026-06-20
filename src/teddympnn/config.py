@@ -26,7 +26,7 @@ from teddympnn.models.protein_mpnn import ProteinMPNN
 from teddympnn.weights.pretrained import default_pretrained_weights
 
 ModelType = Literal["protein_mpnn", "ligand_mpnn"]
-SourceType = Literal["teddymer", "nvidia", "pdb"]
+SourceType = Literal["teddymer", "pdb"]
 
 _MODEL_TYPE_TO_CLASS: dict[ModelType, type] = {
     "protein_mpnn": ProteinMPNN,
