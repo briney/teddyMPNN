@@ -22,18 +22,14 @@ _PAD_VALUES: dict[str, float | int | bool] = {
     "residue_mask": False,
     "designed_residue_mask": False,
     "fixed_residue_mask": False,
-    "Y": 0.0,
-    "Y_m": False,
-    "Y_t": 0,
 }
 
 
 class PaddingCollator:
     """Collates variable-length structure feature dicts into padded batches.
 
-    Pads protein residue tensors (keyed by residue length L) and ligand atom
-    tensors (keyed by atom count N) to their respective maxima within the
-    batch.
+    Pads protein residue tensors (keyed by residue length L) to their maximum
+    within the batch.
 
     Non-tensor values (e.g. ``num_residues``) are collected into lists.
     """
@@ -54,9 +50,6 @@ class PaddingCollator:
         }
     )
 
-    # Keys that are padded along the ligand atom (N) dimension
-    LIGAND_KEYS: frozenset[str] = frozenset({"Y", "Y_m", "Y_t"})
-
     def __call__(self, batch: list[dict[str, Any]]) -> dict[str, Any]:
         """Pad and stack a list of feature dicts into a batched dict.
 
@@ -65,38 +58,22 @@ class PaddingCollator:
 
         Returns:
             Batched dict with shape ``(B, L_max, ...)`` for residue tensors,
-            ``(B, N_max, ...)`` for ligand tensors, and lists for metadata.
+            and lists for metadata.
         """
         if not batch:
             msg = "Cannot collate empty batch"
             raise ValueError(msg)
 
-        B = len(batch)
         result: dict[str, Any] = {}
 
-        # Find max lengths
         L_max = max(b["S"].shape[0] for b in batch)
-        N_max = max(b["Y"].shape[0] for b in batch) if "Y" in batch[0] else 0
 
         for key in batch[0]:
             if key in self.RESIDUE_KEYS:
                 result[key] = self._pad_and_stack(batch, key, L_max, dim=0)
-            elif key in self.LIGAND_KEYS:
-                if N_max > 0:
-                    result[key] = self._pad_and_stack(batch, key, N_max, dim=0)
-                else:
-                    # All examples have empty ligand tensors — keep empty
-                    sample = batch[0][key]
-                    if sample.dim() == 1:
-                        result[key] = torch.zeros(B, 0, dtype=sample.dtype)
-                    else:
-                        shape = [B, 0] + list(sample.shape[1:])
-                        result[key] = torch.zeros(*shape, dtype=sample.dtype)
             elif isinstance(batch[0][key], torch.Tensor):
-                # Scalar tensors — just stack
                 result[key] = torch.stack([b[key] for b in batch])
             else:
-                # Non-tensor metadata (e.g. num_residues, chain_ids)
                 result[key] = [b[key] for b in batch]
 
         return result

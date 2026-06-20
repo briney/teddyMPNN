@@ -64,9 +64,6 @@ class TestPPIDataset:
             "residue_mask",
             "designed_residue_mask",
             "fixed_residue_mask",
-            "Y",
-            "Y_m",
-            "Y_t",
             "num_residues",
         }
         assert expected_keys <= set(item.keys())
@@ -150,15 +147,6 @@ class TestPPIDataset:
 
         for key in ["S", "R_idx", "chain_labels"]:
             torch.testing.assert_close(item1[key], item2[key])
-
-    def test_empty_ligand_context(self, manifest_with_1brs: Path):
-        """Without include_ligand_atoms, Y should be empty."""
-        ds = PPIDataset(manifest_with_1brs, include_ligand_atoms=False)
-        item = ds[0]
-
-        assert item["Y"].shape[0] == 0
-        assert item["Y_m"].shape[0] == 0
-        assert item["Y_t"].shape[0] == 0
 
     def test_lengths_property(self, manifest_with_1brs: Path):
         """lengths should match the number of views."""

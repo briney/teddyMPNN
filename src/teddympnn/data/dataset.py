@@ -18,8 +18,6 @@ from torch.utils.data import DataLoader, Dataset, Subset
 
 from teddympnn.data.features import (
     derive_backbone,
-    extract_ligand_atoms,
-    extract_sidechain_atoms,
     identify_interface_residues,
     parse_structure,
 )
@@ -50,9 +48,6 @@ class PPIDataset(Dataset[dict[str, Any]]):
         cache_dir: Optional directory for caching parsed features as ``.pt``.
         max_residues: Skip structures with more residues than this.
         min_interface_contacts: Skip structures with fewer interface residues.
-        include_ligand_atoms: Extract non-protein atoms for ligand context.
-        atomize_partner_sidechains: Include fixed-partner side-chain atoms
-            in the ligand context (Y/Y_m/Y_t).
     """
 
     def __init__(
@@ -62,22 +57,12 @@ class PPIDataset(Dataset[dict[str, Any]]):
         cache_dir: str | Path | None = None,
         max_residues: int = 6000,
         min_interface_contacts: int = 4,
-        include_ligand_atoms: bool = False,
-        atomize_partner_sidechains: bool = False,
-        sidechain_atomization_probability: float = 1.0,
-        sidechain_atomization_per_residue_probability: float = 1.0,
         source_filter: str | None = None,
     ) -> None:
         self.manifest_path = Path(manifest_path)
         self.cache_dir = Path(cache_dir) if cache_dir else None
         self.max_residues = max_residues
         self.min_interface_contacts = min_interface_contacts
-        self.include_ligand_atoms = include_ligand_atoms
-        self.atomize_partner_sidechains = atomize_partner_sidechains
-        self.sidechain_atomization_probability = sidechain_atomization_probability
-        self.sidechain_atomization_per_residue_probability = (
-            sidechain_atomization_per_residue_probability
-        )
         self.source_filter = source_filter
 
         if self.cache_dir:
@@ -229,11 +214,6 @@ class PPIDataset(Dataset[dict[str, Any]]):
         features["X"] = X
         features["X_m"] = X_m
 
-        # Optionally extract ligand atoms
-        if self.include_ligand_atoms:
-            ligand = extract_ligand_atoms(structure_path)
-            features.update(ligand)
-
         if self.cache_dir:
             cache_path = self.cache_dir / f"{manifest_idx}.pt"
             torch.save(features, cache_path)
@@ -270,7 +250,7 @@ class PPIDataset(Dataset[dict[str, Any]]):
             )
             raise ValueError(msg)
 
-        result: dict[str, Any] = {
+        return {
             "xyz_37": features["xyz_37"],
             "xyz_37_m": features["xyz_37_m"],
             "X": features["X"],
@@ -284,45 +264,6 @@ class PPIDataset(Dataset[dict[str, Any]]):
             "num_residues": L,
             "source": source,
         }
-
-        # Ligand context
-        if self.include_ligand_atoms and "Y" in features:
-            Y = features["Y"]
-            Y_m = features["Y_m"]
-            Y_t = features["Y_t"]
-
-            # Optionally add fixed-partner side-chain atoms
-            if self.atomize_partner_sidechains:
-                atomize_mask = fixed_residue_mask
-                if self.sidechain_atomization_probability < 1.0:
-                    if random.random() >= self.sidechain_atomization_probability:
-                        atomize_mask = torch.zeros_like(fixed_residue_mask)
-                    else:
-                        keep = (
-                            torch.rand_like(fixed_residue_mask.float())
-                            < self.sidechain_atomization_per_residue_probability
-                        )
-                        atomize_mask = fixed_residue_mask & keep
-                sc = extract_sidechain_atoms(
-                    features["xyz_37"],
-                    features["xyz_37_m"],
-                    features["S"],
-                    atomize_mask,
-                )
-                if sc["Y"].shape[0] > 0:
-                    Y = torch.cat([Y, sc["Y"]], dim=0)
-                    Y_m = torch.cat([Y_m, sc["Y_m"]], dim=0)
-                    Y_t = torch.cat([Y_t, sc["Y_t"]], dim=0)
-
-            result["Y"] = Y
-            result["Y_m"] = Y_m
-            result["Y_t"] = Y_t
-        else:
-            result["Y"] = torch.zeros(0, 3, dtype=torch.float32)
-            result["Y_m"] = torch.zeros(0, dtype=torch.bool)
-            result["Y_t"] = torch.zeros(0, dtype=torch.long)
-
-        return result
 
     @property
     def lengths(self) -> list[int]:
