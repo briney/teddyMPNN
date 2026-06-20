@@ -33,16 +33,20 @@ class LabelSmoothedNLLLoss(nn.Module):
         log_probs: torch.Tensor,
         targets: torch.Tensor,
         mask: torch.Tensor,
+        weights: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        """Compute masked label-smoothed NLL loss.
+        """Compute masked, optionally per-residue-weighted, label-smoothed NLL.
 
         Args:
             log_probs: Predicted log-probabilities, shape ``(B, L, V)``.
             targets: Ground-truth token indices, shape ``(B, L)``.
             mask: Loss mask (1 = designed position), shape ``(B, L)``.
+            weights: Optional per-residue weights, shape ``(B, L)``. When given,
+                the loss becomes the weighted mean over designed positions;
+                ``None`` (or all-equal weights) reproduces the unweighted mean.
 
         Returns:
-            Scalar loss (mean over designed positions).
+            Scalar loss (weighted mean over designed positions).
         """
         # One-hot encode targets: (B, L, V)
         one_hot = torch.zeros_like(log_probs).scatter_(2, targets.unsqueeze(-1), 1.0)
@@ -51,13 +55,16 @@ class LabelSmoothedNLLLoss(nn.Module):
         eps = self.label_smoothing
         smoothed = (1.0 - eps) * one_hot + eps / self.vocab_size
 
-        # Per-residue NLL: -(smoothed * log_probs).sum(dim=-1) → (B, L)
+        # Per-residue NLL: (B, L)
         per_residue_nll = -(smoothed * log_probs).sum(dim=-1)
 
-        # Mask and reduce
-        mask_float = mask.float()
-        numerator = (per_residue_nll * mask_float).sum()
-        denominator = mask_float.sum()
+        # Effective per-residue weight = mask, optionally scaled.
+        weight = mask.float()
+        if weights is not None:
+            weight = weight * weights.to(weight.dtype)
+
+        numerator = (per_residue_nll * weight).sum()
+        denominator = weight.sum()
 
         # DDP reduction: sum numerator and denominator across workers
         if torch.distributed.is_available() and torch.distributed.is_initialized():

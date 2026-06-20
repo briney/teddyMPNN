@@ -88,3 +88,42 @@ class TestLabelSmoothedNLLLoss:
         nll = -torch.gather(log_probs, 2, targets.unsqueeze(-1)).squeeze(-1)
         expected = nll.mean()
         assert torch.allclose(loss, expected, atol=1e-5)
+
+
+def test_weights_none_matches_unweighted() -> None:
+    torch.manual_seed(0)
+    b, length, vocab = 2, 5, 21
+    log_probs = torch.log_softmax(torch.randn(b, length, vocab), dim=-1)
+    targets = torch.randint(0, vocab, (b, length))
+    mask = torch.ones(b, length)
+    loss_fn = LabelSmoothedNLLLoss()
+    unweighted = loss_fn(log_probs, targets, mask)
+    explicit_ones = loss_fn(log_probs, targets, mask, weights=torch.ones(b, length))
+    assert torch.allclose(unweighted, explicit_ones)
+
+
+def test_constant_weight_is_invariant() -> None:
+    torch.manual_seed(1)
+    b, length, vocab = 2, 4, 21
+    log_probs = torch.log_softmax(torch.randn(b, length, vocab), dim=-1)
+    targets = torch.randint(0, vocab, (b, length))
+    mask = torch.ones(b, length)
+    loss_fn = LabelSmoothedNLLLoss()
+    base = loss_fn(log_probs, targets, mask)
+    scaled = loss_fn(log_probs, targets, mask, weights=torch.full((b, length), 3.0))
+    assert torch.allclose(base, scaled)
+
+
+def test_upweighting_high_loss_positions_increases_loss() -> None:
+    b, length, vocab = 1, 3, 21
+    logits = torch.full((b, length, vocab), -10.0)
+    targets = torch.tensor([[0, 1, 2]])
+    logits[0, 0, 5] = 10.0  # predicts 5, target 0 -> high NLL at position 0
+    logits[0, 1, 1] = 10.0  # correct
+    logits[0, 2, 2] = 10.0  # correct
+    log_probs = torch.log_softmax(logits, dim=-1)
+    mask = torch.ones(b, length)
+    loss_fn = LabelSmoothedNLLLoss(label_smoothing=0.0)
+    base = loss_fn(log_probs, targets, mask)
+    up = loss_fn(log_probs, targets, mask, weights=torch.tensor([[5.0, 1.0, 1.0]]))
+    assert up > base
