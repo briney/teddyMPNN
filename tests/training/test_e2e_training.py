@@ -17,6 +17,7 @@ from teddympnn.config import DataConfig, DatasetConfig, ModelConfig, TrainingCon
 from teddympnn.data.collator import PaddingCollator
 from teddympnn.data.features import derive_backbone, parse_structure
 from teddympnn.models import ProteinMPNN
+from teddympnn.training.loss import LabelSmoothedNLLLoss
 from teddympnn.training.trainer import Trainer
 from teddympnn.weights.io import load_checkpoint_bundle
 from teddympnn.weights.legacy import load_legacy_weights
@@ -333,3 +334,52 @@ class TestE2ECPUOnly:
             loss = trainer.train_step(batch)
             assert not torch.isnan(torch.tensor(loss))
             assert not torch.isinf(torch.tensor(loss))
+
+    def test_interface_weight_1_equals_standard_ce(self) -> None:
+        """interface_weight=1.0 must be numerically identical to unweighted CE.
+
+        Regression guard: the trainer computes weights = 1.0 + (w-1)*mask,
+        so w=1.0 collapses to all-ones and the weighted mean equals the
+        plain unweighted mean. This test ensures that invariant holds
+        end-to-end on a fixed batch so it catches any future breakage.
+        """
+        torch.manual_seed(0)
+        model = ProteinMPNN(
+            hidden_dim=32, num_encoder_layers=1, num_decoder_layers=1, num_neighbors=10
+        )
+        model.eval()
+
+        B, L = 2, 15
+        # Fixed batch with known interface mask (half the residues are interface)
+        iface_mask = torch.zeros(B, L, dtype=torch.bool)
+        iface_mask[:, : L // 2] = True
+        batch = {
+            "X": torch.randn(B, L, 4, 3),
+            "S": torch.randint(0, 21, (B, L)),
+            "R_idx": torch.arange(L).unsqueeze(0).expand(B, -1),
+            "chain_labels": torch.zeros(B, L, dtype=torch.long),
+            "residue_mask": torch.ones(B, L),
+            "designed_residue_mask": torch.ones(B, L),
+            "fixed_residue_mask": torch.zeros(B, L),
+            "interface_residue_mask": iface_mask,
+        }
+
+        with torch.no_grad():
+            output = model(batch)
+        log_probs = output["log_probs"]  # (B, L, V)
+        mask = batch["designed_residue_mask"]
+        targets = batch["S"]
+
+        loss_fn = LabelSmoothedNLLLoss()
+
+        # With interface_weight=1.0 the trainer sets weights = all-ones
+        all_ones = torch.ones(B, L)
+        loss_weighted = loss_fn(log_probs, targets, mask, weights=all_ones)
+
+        # Without weights (standard CE)
+        loss_unweighted = loss_fn(log_probs, targets, mask, weights=None)
+
+        assert torch.allclose(loss_weighted, loss_unweighted, atol=1e-6), (
+            f"interface_weight=1.0 loss {loss_weighted.item():.6f} != "
+            f"standard CE loss {loss_unweighted.item():.6f}"
+        )
