@@ -1,0 +1,1 @@
+now that we have esssentially an mvp, i want to publish to PyPI. update the version to `0.1.0` and update the README to include pip installation  instructions. once all thats done, ill create a new version which will trigger the python publish workflow.
