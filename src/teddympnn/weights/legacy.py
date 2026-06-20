@@ -1,8 +1,8 @@
-"""Legacy ↔ current weight conversion for dauparas/ProteinMPNN.
+"""Legacy weight loading for dauparas/ProteinMPNN.
 
 Legacy checkpoints use different module names, token ordering, and RBF pair
 ordering. This module handles all the transformations needed to load legacy
-weights into our model and export our weights back to legacy format.
+weights into our model.
 """
 
 from __future__ import annotations
@@ -16,8 +16,6 @@ import torch
 from torch import nn
 
 from teddympnn.models.tokens import (
-    current_to_legacy_rbf_permutation,
-    current_to_legacy_token_permutation,
     expand_pair_permutation,
     legacy_to_current_rbf_permutation,
     legacy_to_current_token_permutation,
@@ -194,31 +192,6 @@ def _drop_120th_atom_type(
             state_dict[key] = torch.cat([tensor[:, :119], tensor[:, 120:]], dim=1)
 
 
-def _restore_120th_atom_type(
-    state_dict: OrderedDict[str, torch.Tensor],
-) -> None:
-    """Inverse of :func:`_drop_120th_atom_type`.
-
-    Re-inserts a zero column at index 119 in the input dimension of the
-    atom-type-embedding weights so the resulting shape matches the legacy
-    120-atom-type vocabulary expected by the legacy dauparas checkpoints.
-    """
-    keys_to_check = [
-        "graph_featurization_module.embed_atom_type_features.weight",
-        "graph_featurization_module.ligand_subgraph_node_embedding.weight",
-    ]
-    for key in keys_to_check:
-        if key not in state_dict:
-            continue
-        tensor = state_dict[key]
-        # Current input is [119 element + 19 group + 8 period] = 146.
-        # Legacy input is [120 element + 19 group + 8 period] = 147.
-        if tensor.shape[1] != 146:
-            continue
-        zero_col = torch.zeros(tensor.shape[0], 1, dtype=tensor.dtype, device=tensor.device)
-        state_dict[key] = torch.cat([tensor[:, :119], zero_col, tensor[:, 119:]], dim=1)
-
-
 def load_legacy_weights(
     path: str | Path,
     model: nn.Module,
@@ -278,40 +251,3 @@ def load_legacy_weights(
 
     logger.info("Loaded legacy checkpoint from %s", path)
     return dict(checkpoint)
-
-
-def convert_to_legacy(state_dict: dict[str, torch.Tensor]) -> OrderedDict[str, torch.Tensor]:
-    """Convert current state_dict to legacy format for export.
-
-    Applies reverse transformations:
-    1. Reorder tokens back to 1-letter alphabetical.
-    2. Reorder RBF pairs back to same-atom-first.
-    3. Restore the 120th atom-type slot (legacy format only).
-    4. Rename keys to legacy naming.
-
-    Args:
-        state_dict: Current-format state_dict.
-
-    Returns:
-        Legacy-format state_dict.
-    """
-    legacy = OrderedDict(state_dict)
-
-    # Reverse token ordering
-    token_perm = current_to_legacy_token_permutation()
-    _reorder_token_weights(legacy, token_perm)
-
-    # Reverse RBF ordering
-    rbf_perm = current_to_legacy_rbf_permutation()
-    _reorder_rbf_weights(legacy, rbf_perm)
-
-    # Restore dropped 120th atom type for legacy exports.
-    _restore_120th_atom_type(legacy)
-
-    # Rename keys
-    final = OrderedDict()
-    for key, value in legacy.items():
-        new_key = _rename_key_current_to_legacy(key)
-        final[new_key] = value
-
-    return final

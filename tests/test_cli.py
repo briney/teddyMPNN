@@ -52,16 +52,6 @@ class TestCLIHelp:
         assert result.exit_code == 0
         assert "config" in result.output.lower()
 
-    def test_checkpoints_help(self) -> None:
-        """checkpoints --help works."""
-        result = runner.invoke(app, ["checkpoints", "--help"])
-        assert result.exit_code == 0
-
-    def test_checkpoints_export_foundry_help(self) -> None:
-        """checkpoints export-foundry --help works."""
-        result = runner.invoke(app, ["checkpoints", "export-foundry", "--help"])
-        assert result.exit_code == 0
-
     def test_evaluate_help(self) -> None:
         """evaluate --help works."""
         result = runner.invoke(app, ["evaluate", "--help"])

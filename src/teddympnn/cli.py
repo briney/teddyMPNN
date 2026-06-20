@@ -16,9 +16,6 @@ app = typer.Typer(
 download_app = typer.Typer(help="Download and prepare datasets.")
 app.add_typer(download_app, name="download")
 
-checkpoints_app = typer.Typer(help="Checkpoint management.")
-app.add_typer(checkpoints_app, name="checkpoints")
-
 evaluate_app = typer.Typer(help="Evaluate a trained model.")
 app.add_typer(evaluate_app, name="evaluate")
 
@@ -161,29 +158,6 @@ def train(
 
     trainer.train()
     typer.echo("Training complete.")
-
-
-# ---------------------------------------------------------------------------
-# Checkpoint subcommands
-# ---------------------------------------------------------------------------
-
-
-@checkpoints_app.command("export-foundry")
-def export_foundry(
-    checkpoint: Annotated[Path, typer.Option(help="teddyMPNN checkpoint path.")] = ...,  # type: ignore[assignment]
-    output: Annotated[Path, typer.Option(help="Output Foundry checkpoint path.")] = ...,  # type: ignore[assignment]
-) -> None:
-    """Export a teddyMPNN checkpoint to Foundry format."""
-
-    from teddympnn.models import ProteinMPNN
-    from teddympnn.weights.foundry import export_foundry_checkpoint
-    from teddympnn.weights.io import load_checkpoint_bundle
-
-    model = ProteinMPNN()
-
-    bundle = load_checkpoint_bundle(checkpoint, model, map_location="cpu")
-    export_foundry_checkpoint(output, model, config=bundle.get("config"))
-    typer.echo(f"Exported Foundry checkpoint to {output}")
 
 
 # ---------------------------------------------------------------------------
