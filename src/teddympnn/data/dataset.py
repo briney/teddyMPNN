@@ -250,6 +250,16 @@ class PPIDataset(Dataset[dict[str, Any]]):
             )
             raise ValueError(msg)
 
+        # Per-residue interface mask (computed on valid residues, scattered back).
+        res_mask = features["residue_mask"].bool()
+        interface_residue_mask = torch.zeros(L, dtype=torch.bool)
+        if res_mask.any():
+            interface_residue_mask[res_mask] = identify_interface_residues(
+                features["xyz_37"][res_mask],
+                features["xyz_37_m"][res_mask],
+                features["chain_labels"][res_mask],
+            )
+
         return {
             "xyz_37": features["xyz_37"],
             "xyz_37_m": features["xyz_37_m"],
@@ -261,6 +271,7 @@ class PPIDataset(Dataset[dict[str, Any]]):
             "residue_mask": features["residue_mask"],
             "designed_residue_mask": designed_residue_mask,
             "fixed_residue_mask": fixed_residue_mask,
+            "interface_residue_mask": interface_residue_mask,
             "num_residues": L,
             "source": source,
         }

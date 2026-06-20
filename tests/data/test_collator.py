@@ -116,3 +116,15 @@ class TestPaddingCollator:
         collator = PaddingCollator()
         with pytest.raises(ValueError, match="empty"):
             collator([])
+
+    def test_collate_pads_interface_mask(self):
+        """interface_residue_mask should be padded to max-L with False."""
+        collator = PaddingCollator()
+        a = _make_example(4)
+        b = _make_example(6)
+        a["interface_residue_mask"] = torch.ones(4, dtype=torch.bool)
+        b["interface_residue_mask"] = torch.zeros(6, dtype=torch.bool)
+        out = collator([a, b])
+        assert out["interface_residue_mask"].shape == (2, 6)
+        assert out["interface_residue_mask"].dtype == torch.bool
+        assert out["interface_residue_mask"][0, 4:].sum() == 0  # padded with False

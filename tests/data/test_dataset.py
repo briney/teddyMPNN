@@ -306,6 +306,15 @@ class TestMixedDataLoaderWeighting:
         assert sampler._epoch == 42  # type: ignore[attr-defined]
 
 
+def test_getitem_includes_interface_mask(manifest_with_1brs: Path) -> None:
+    """Each sample from PPIDataset must include a bool interface_residue_mask."""
+    ds = PPIDataset(manifest_with_1brs)
+    sample = ds[0]
+    mask = sample["interface_residue_mask"]
+    assert mask.dtype == torch.bool
+    assert mask.shape == sample["S"].shape
+
+
 class TestMinInterfaceContactsFilter:
     """``PPIDataset.min_interface_contacts`` must drop low-contact entries."""
 

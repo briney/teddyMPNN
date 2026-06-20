@@ -19,7 +19,6 @@ from torch import nn
 from torch.nn.parallel import DistributedDataParallel
 from torch.nn.utils import clip_grad_norm_
 
-from teddympnn.data.features import identify_interface_residues
 from teddympnn.models import ProteinMPNN
 from teddympnn.training.loss import LabelSmoothedNLLLoss
 from teddympnn.training.scheduler import NoamScheduler
@@ -282,10 +281,14 @@ class Trainer:
 
         with torch.amp.autocast("cuda", dtype=self.amp_dtype, enabled=self.use_amp):  # type: ignore[attr-defined]
             output = self.model(batch)
+            weights = (
+                1.0 + (self.config.interface_weight - 1.0) * batch["interface_residue_mask"].float()
+            )
             loss = self.loss_fn(
                 output["log_probs"],
                 batch["S"],
                 batch["designed_residue_mask"],
+                weights=weights,
             )
 
         self.scaler.scale(loss).backward()
@@ -324,10 +327,15 @@ class Trainer:
 
             with torch.amp.autocast("cuda", dtype=self.amp_dtype, enabled=self.use_amp):  # type: ignore[attr-defined]
                 output = self.model(batch)
+                weights = (
+                    1.0
+                    + (self.config.interface_weight - 1.0) * batch["interface_residue_mask"].float()
+                )
                 loss = self.loss_fn(
                     output["log_probs"],
                     batch["S"],
                     batch["designed_residue_mask"],
+                    weights=weights,
                 )
 
             total_loss += loss.item()
@@ -346,13 +354,7 @@ class Trainer:
                 designed = designed_mask[b] & res_mask
                 if not designed.any():
                     continue
-                interface = identify_interface_residues(
-                    batch["xyz_37"][b][res_mask],
-                    batch["xyz_37_m"][b][res_mask],
-                    batch["chain_labels"][b][res_mask],
-                )
-                full_interface = torch.zeros_like(res_mask)
-                full_interface[res_mask] = interface
+                full_interface = batch["interface_residue_mask"][b].bool()
                 designed_interface = designed & full_interface
                 iface_correct = (preds[b] == batch["S"][b]) & designed_interface
                 total_iface_correct += iface_correct.sum().item()

@@ -67,6 +67,9 @@ def _make_synthetic_batches(
     """Create synthetic batches for CPU-only testing."""
     batches = []
     for _ in range(n_batches):
+        # Half the residues are "interface" for weighting tests
+        iface_mask = torch.zeros(B, L, dtype=torch.bool)
+        iface_mask[:, : L // 2] = True
         batches.append(
             {
                 "X": torch.randn(B, L, 4, 3),
@@ -76,6 +79,7 @@ def _make_synthetic_batches(
                 "residue_mask": torch.ones(B, L),
                 "designed_residue_mask": torch.ones(B, L),
                 "fixed_residue_mask": torch.zeros(B, L),
+                "interface_residue_mask": iface_mask,
             }
         )
     return batches
@@ -256,6 +260,44 @@ class TestE2ECPUOnly:
         ckpt_dir = tmp_path / "outputs" / "checkpoints"
         assert (ckpt_dir / "step_0000025.pt").exists()
         assert (ckpt_dir / "step_0000050.pt").exists()
+
+    def test_interface_weight_produces_finite_loss(self, tmp_path: Path) -> None:
+        """interface_weight=3.0 must produce finite loss (interface residues upweighted)."""
+        model = ProteinMPNN(
+            hidden_dim=32, num_encoder_layers=1, num_decoder_layers=1, num_neighbors=10
+        )
+        config = TrainingConfig(
+            model_type="protein_mpnn",
+            model=ModelConfig(
+                hidden_dim=32,
+                num_encoder_layers=1,
+                num_decoder_layers=1,
+                num_neighbors=10,
+            ),
+            pretrained_weights=tmp_path / "dummy.pt",
+            data=DataConfig(
+                train={"pdb": DatasetConfig(path=tmp_path / "m.tsv", ratio=1.0)},
+            ),
+            max_steps=5,
+            warmup_steps=2,
+            interface_weight=3.0,
+            mixed_precision=False,
+            gradient_checkpointing=False,
+            output_dir=tmp_path / "outputs",
+        )
+
+        trainer = Trainer(
+            config=config,
+            model=model,
+            train_loader=_make_synthetic_batches(n_batches=5),
+            device=torch.device("cpu"),
+        )
+
+        for batch in _make_synthetic_batches(n_batches=5):
+            loss = trainer.train_step(batch)
+            assert not torch.isnan(torch.tensor(loss)), "Loss is NaN with interface_weight=3.0"
+            assert not torch.isinf(torch.tensor(loss)), "Loss is Inf with interface_weight=3.0"
+            assert loss > 0, f"Expected positive loss, got {loss}"
 
     def test_no_nan_with_mixed_precision_cpu(self, tmp_path: Path) -> None:
         """Mixed precision on CPU should not produce NaN (autocast is a no-op on CPU)."""

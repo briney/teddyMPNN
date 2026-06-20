@@ -31,6 +31,7 @@ learning_rate_factor: 2.0
 warmup_steps: 4000
 max_steps: 300000
 label_smoothing: 0.1
+interface_weight: 1.0  # CE weight multiplier for interface residues (>1.0 upweights interface)
 mixed_precision: true
 gradient_checkpointing: true
 num_workers: 8

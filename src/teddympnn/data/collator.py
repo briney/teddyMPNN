@@ -22,6 +22,7 @@ _PAD_VALUES: dict[str, float | int | bool] = {
     "residue_mask": False,
     "designed_residue_mask": False,
     "fixed_residue_mask": False,
+    "interface_residue_mask": False,
 }
 
 
@@ -47,6 +48,7 @@ class PaddingCollator:
             "residue_mask",
             "designed_residue_mask",
             "fixed_residue_mask",
+            "interface_residue_mask",
         }
     )
 

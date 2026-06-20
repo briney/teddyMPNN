@@ -93,6 +93,7 @@ class TrainingConfig(BaseModel):
     warmup_steps: int = 4_000
     max_steps: int = 300_000
     label_smoothing: float = 0.1
+    interface_weight: float = 1.0  # CE weight multiplier for interface residues (1.0 = standard)
     mixed_precision: bool = True
     gradient_checkpointing: bool = True
     num_workers: int = 8
