@@ -1,0 +1,301 @@
+Approved
+
+---
+
+<task-notification>
+<task-id>ac77e51d761fb8fd5</task-id>
+<tool-use-id>toolu_01GS5xZA3BQgkYG9tthHmVhk</tool-use-id>
+<output-file>/tmp/claude-1001/-home-briney-git-teddympnn/2582a0ca-bf45-41f2-851e-7c4484ebdcff/tasks/ac77e51d761fb8fd5.output</output-file>
+<status>completed</status>
+<summary>Agent "Map ligand/nvidia/export removal points" came to rest</summary>
+<note>A task-notification fires each time this agent comes to rest with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result>Perfect! Now let me compile the complete removal map. Let me write a comprehensive summary based on all the information I've gathered:
+
+## PRECISE REMOVAL MAP FOR TEDDYMPNN REFACTOR
+
+Based on my thorough analysis of the codebase, here is the exact removal map with file paths, line ranges, and code references:
+
+---
+
+### **1. LIGANDMPNN MODEL REMOVAL**
+
+**Primary file to delete:**
+- `/home/briney/git/teddympnn/src/teddympnn/models/ligand_mpnn.py` — entire file (244 lines)
+  - Class `LigandMPNN` (lines 24-244): standalone subclass extending `ProteinMPNN`
+  - Contains ligand-specific context encoder layers, graph featurization replacement, ligand context embedding projections
+  - No shared code; all methods are LigandMPNN-only
+
+**In `/home/briney/git/teddympnn/src/teddympnn/models/__init__.py`** (9 lines):
+- Line 5: `from teddympnn.models.ligand_mpnn import LigandMPNN` — DELETE
+- Line 8: `"LigandMPNN"` export in `__all__` — DELETE
+
+**In `/home/briney/git/teddympnn/src/teddympnn/config.py`**:
+- Line 24: `from teddympnn.models.ligand_mpnn import LigandMPNN` — DELETE
+- Line 28: `ModelType = Literal["protein_mpnn", "ligand_mpnn"]` → change to `Literal["protein_mpnn"]`
+- Lines 31-34: `_MODEL_TYPE_TO_CLASS` dict — DELETE entry: `"ligand_mpnn": LigandMPNN,` (lines 32-33)
+- Lines 36-47: `_MODEL_TYPE_TRAINING_DEFAULTS` dict — DELETE entry for `"ligand_mpnn"` (lines 42-46)
+- Line 81: `num_context_atoms: int | None = None  # ligand_mpnn only` — DELETE (ModelConfig field; only used by LigandMPNN)
+- Lines 128-147: Validator logic checking `is_ligand = self.model_type == "ligand_mpnn"` — SIMPLIFY to remove all ligand-specific branches:
+  - Lines 131-133: `if not is_ligand and self.model.num_context_atoms is not None:` block — DELETE
+  - Lines 146-147: `if is_ligand and self.model.num_context_atoms is None:` block — DELETE
+
+**In `/home/briney/git/teddympnn/src/teddympnn/cli.py`**:
+- Lines 148-159: `@download_app.command() def pretrained(...)` — KEEP but simplify: remove model type option default `"ligand_mpnn"` (line 151), make it protein_mpnn only or error if ligand_mpnn requested
+- Lines 204-224: `@checkpoints_app.command("export-foundry") def export_foundry(...)` — SIMPLIFY (lines 208-223):
+  - Line 214: `from teddympnn.models import LigandMPNN, ProteinMPNN` → remove `LigandMPNN` import
+  - Line 218: `model_cls = LigandMPNN if model_type == "ligand_mpnn" else ProteinMPNN` → DELETE, hardcode `model_cls = ProteinMPNN`
+  - Line 209: model_type Option default remains for now (used elsewhere), but export only supports protein_mpnn
+- Lines 231-281: `@evaluate_app.command() def recovery(...)` — SIMPLIFY (lines 235-237, 249-256):
+  - Lines 249-256: model selection logic → hardcode to ProteinMPNN, remove model_type option or error if not protein_mpnn
+  - Line 259: `include_ligand_atoms=(model_type == "ligand_mpnn")` → hardcode to `False`
+- Lines 283-339: `@evaluate_app.command() def benchmark(...)` — KEEP (will be deleted entirely in section 4)
+- Lines 341-384: `@evaluate_app.command() def ddg(...)` — SIMPLIFY (lines 346-348, 356-365):
+  - Lines 356-365: model selection → hardcode to ProteinMPNN
+- Lines 391-472: `@app.command() def score(...)` — SIMPLIFY (lines 397-460):
+  - Line 415: `model_cls = LigandMPNN if model_type == "ligand_mpnn" else ProteinMPNN` → hardcode to ProteinMPNN
+  - Lines 443-460: `if model_type == "ligand_mpnn":` block — DELETE (ligand atom extraction)
+
+---
+
+### **2. LIGAND DATA BRANCHES** (code shared with ProteinMPNN graph/features)
+
+**In `/home/briney/git/teddympnn/src/teddympnn/data/features.py`**:
+- Lines 49-172: Element type constants and `element_to_idx` map — **KEEP** (used by `extract_ligand_atoms` which will be deleted)
+- Lines 175-177: `EXCLUDED_LIGAND_RESIDUES`, `EXCLUDED_IONS` — **DELETE** (only used by `extract_ligand_atoms`)
+- Lines 388-446: `def extract_ligand_atoms(...)` — **DELETE ENTIRE FUNCTION** (194 lines); returns `{Y, Y_m, Y_t}`
+- Lines 483-541: `def extract_sidechain_atoms(...)` — **DELETE ENTIRE FUNCTION** (59 lines); extracts fixed-partner side-chain atoms for LigandMPNN context
+
+**In `/home/briney/git/teddympnn/src/teddympnn/data/dataset.py`**:
+- Lines 65-66: `include_ligand_atoms: bool = False` parameter in `__init__` — DELETE
+- Lines 74-75: `self.include_ligand_atoms = include_ligand_atoms` — DELETE
+- Lines 104-106: `atomize_partner_sidechains`, `sidechain_atomization_probability`, `sidechain_atomization_per_residue_probability` parameters — DELETE
+- Lines 76-80: store these parameters — DELETE
+- Lines 232-235: `if self.include_ligand_atoms: ligand = extract_ligand_atoms(...)` block in `_load_features` — DELETE
+- Lines 288-323: `if self.include_ligand_atoms and "Y" in features:` block in `__getitem__` — DELETE entire ligand context section (36 lines)
+- After deletion, lines 321-323 become unconditional: always return empty Y/Y_m/Y_t tensors or DELETE them too
+
+**In `/home/briney/git/teddympnn/src/teddympnn/data/collator.py`**:
+- Lines 58: `LIGAND_KEYS: frozenset[str] = frozenset({"Y", "Y_m", "Y_t"})` — DELETE
+- Lines 79: `N_max = max(b["Y"].shape[0] for b in batch) if "Y" in batch[0] else 0` — SIMPLIFY to `N_max = 0` (or remove N_max logic entirely)
+- Lines 84-86: ligand key padding logic `elif key in self.LIGAND_KEYS:` — DELETE
+- Lines 27: `"Y": 0.0, "Y_m": False, "Y_t": 0,` in `_PAD_VALUES` — DELETE
+
+**In `/home/briney/git/teddympnn/src/teddympnn/data/sampler.py`**:
+- Line 29-30: comment mentioning "For LigandMPNN training the recommended value is ~6,000" — update to remove LigandMPNN reference
+
+**In `/home/briney/git/teddympnn/src/teddympnn/data/__init__.py`**:
+- Line 13: `extract_ligand_atoms` export — DELETE
+
+**Config knobs tied to LigandMPNN in `/home/briney/git/teddympnn/src/teddympnn/config.py`**:
+- Line 104: `atomize_partner_sidechains: bool = True` — DELETE
+- Line 105-106: `sidechain_atomization_probability`, `sidechain_atomization_per_residue_probability` — DELETE
+
+---
+
+### **3. NVIDIA REMOVAL**
+
+**File to delete entirely:**
+- `/home/briney/git/teddympnn/src/teddympnn/data/nvidia_complexes.py` (entire file, ~250 lines)
+  - Functions: `download_nvidia_metadata`, `filter_nvidia_metadata`, `download_nvidia_chunks`, `extract_nvidia_structures`
+
+**In `/home/briney/git/teddympnn/src/teddympnn/cli.py`**:
+- Lines 91-118: `@download_app.command("nvidia-complexes")` entire command — DELETE (28 lines)
+
+**In `/home/briney/git/teddympnn/src/teddympnn/config.py`**:
+- Line 29: `SourceType = Literal["teddymer", "nvidia", "pdb"]` → change to `Literal["teddymer", "pdb"]`
+- Lines 65-66: `DataConfig` field types reference SourceType — automatically updated when SourceType changes
+
+**In `/home/briney/git/teddympnn/src/teddympnn/data/splits.py`**:
+- Lines 113-159: `def split_nvidia_manifest(...)` — DELETE ENTIRE FUNCTION (47 lines)
+- Lines 349-363: `if nvidia_manifest is not None:` block in `prepare_manifests` — DELETE (15 lines)
+  - Calls `split_nvidia_manifest`, normalizes, writes train/val TSVs, adds to source_paths
+
+**In `/home/briney/git/teddympnn/src/teddympnn/data/__init__.py`** — no direct exports
+
+**In `/home/briney/git/teddympnn/configs/train.yaml`**:
+- Lines 16-19: `nvidia:` source config block — DELETE (4 lines):
+  ```yaml
+  nvidia:
+    path: data/manifests/train_nvidia.tsv
+    ratio: 0.20
+  ```
+- Lines 27-29: `nvidia:` validation block — DELETE (3 lines)
+
+---
+
+### **4. BENCHMARK REMOVAL**
+
+**File to delete:**
+- `/home/briney/git/teddympnn/src/teddympnn/evaluation/benchmark.py` (entire file, 295 lines)
+  - Classes: `ModelSpec`, `BenchmarkResult`, `BenchmarkReport`
+  - Functions: `_load_model`, `run_benchmark`, `print_comparison_table`
+
+**In `/home/briney/git/teddympnn/src/teddympnn/evaluation/__init__.py`**:
+- Lines 5: `from teddympnn.evaluation.benchmark import BenchmarkReport, BenchmarkResult, run_benchmark` — DELETE
+- Lines 14-15: exports `BenchmarkReport, BenchmarkResult, run_benchmark` — DELETE these three names from `__all__`
+
+**In `/home/briney/git/teddympnn/src/teddympnn/cli.py`**:
+- Lines 283-339: `@evaluate_app.command() def benchmark(...)` entire command — DELETE (57 lines)
+
+**File to delete:**
+- `/home/briney/git/teddympnn/scripts/run_benchmark.py` (entire file, 127 lines)
+  - Convenience wrapper around `teddympnn evaluate benchmark`
+
+**File to delete:**
+- `/home/briney/git/teddympnn/configs/benchmark.yaml` (entire file, 36 lines)
+  - Configuration for benchmark command (now removed)
+
+---
+
+### **5. WEIGHT-EXPORT TRIM**
+
+**LOAD paths (KEEP):**
+- `/home/briney/git/teddympnn/src/teddympnn/weights/foundry.py` lines 20-51: `load_foundry_checkpoint` — KEEP (loading from Foundry format)
+- `/home/briney/git/teddympnn/src/teddympnn/weights/io.py` lines 44-138: `save_checkpoint_bundle`, `load_checkpoint_bundle`, `load_model_weights`, `download_pretrained` — KEEP all (native checkpoint I/O)
+- `/home/briney/git/teddympnn/src/teddympnn/weights/legacy.py` lines 222-280: `load_legacy_weights` — KEEP (loading old IPD weights)
+
+**EXPORT/conversion paths (DELETE):**
+- `/home/briney/git/teddympnn/src/teddympnn/weights/foundry.py` lines 54-79: `export_foundry_checkpoint` — DELETE (writing Foundry format)
+- `/home/briney/git/teddympnn/src/teddympnn/weights/legacy.py` lines 283-317: `convert_to_legacy` — DELETE (exporting to legacy format for backward compat)
+- `/home/briney/git/teddympnn/src/teddympnn/weights/legacy.py` lines 197-219: `_restore_120th_atom_type` — DELETE (only used by `convert_to_legacy`)
+- Note: `_drop_120th_atom_type` (lines 167-194) is used by `load_legacy_weights` — KEEP
+
+**In `/home/briney/git/teddympnn/src/teddympnn/cli.py`**:
+- Lines 204-224: `@checkpoints_app.command("export-foundry")` command — DELETE entirely (21 lines)
+  - Imports: line 214 `from teddympnn.weights.foundry import export_foundry_checkpoint` removed
+  - Import line 215 `from teddympnn.weights.io import load_checkpoint_bundle` — DELETE if not used elsewhere (it's used here)
+
+---
+
+### **6. EVAL CONSOLIDATION**
+
+**Relationship summary:**
+
+| File | Functions | Dependencies |
+|------|-----------|--------------|
+| `evaluation/_batch.py` | `load_eval_features`, `extract_chain_view`, `build_eval_batch` | None (no imports from binding_affinity/skempi) |
+| `evaluation/binding_affinity.py` | `score_structure`, `score_complex`, `predict_ddg` | imports `_batch.py` helpers, imports `LigandMPNN` (can be removed) |
+| `evaluation/skempi.py` | `evaluate_skempi`, parse/download helpers | imports `binding_affinity.predict_ddg`, does NOT import `benchmark.py` |
+
+**Key finding:** `skempi.py` imports `predict_ddg` from `binding_affinity.py` (line 20). The `binding_affinity.py` currently imports `LigandMPNN` (line 26) for the `_model_type` helper. After LigandMPNN deletion, simplify `_model_type` (lines 48-49) to always return "protein_mpnn" or remove it entirely.
+
+**No consolidation needed.** Sequence recovery, binding affinity, and SKEMPI are separate evaluation paths:
+- `sequence_recovery.py` — interface recovery metric (independent)
+- `binding_affinity.py` + `_batch.py` — ddG prediction (shared batch construction)
+- `skempi.py` — SKEMPI benchmark driver (calls `predict_ddg`)
+- `benchmark.py` — DELETES; it ran all three (recovery + skempi) across multiple models
+
+**In `/home/briney/git/teddympnn/src/teddympnn/evaluation/binding_affinity.py`**:
+- Line 26: `from teddympnn.models.ligand_mpnn import LigandMPNN` — DELETE
+- Lines 48-49: `_model_type` helper — SIMPLIFY to `return "protein_mpnn"` (no longer needs isinstance check)
+
+---
+
+### **7. CLI COMMAND INVENTORY**
+
+All `typer.Typer` commands in `/home/briney/git/teddympnn/src/teddympnn/cli.py`:
+
+| Command | Lines | Type | Action |
+|---------|-------|------|--------|
+| `main` (version) | 26-35 | Root callback | KEEP |
+| `download teddymer` | 43-89 | download sub | KEEP |
+| `download nvidia-complexes` | 91-118 | download sub | **DELETE** |
+| `download prepare-manifests` | 120-145 | download sub | KEEP (update to remove nvidia handling) |
+| `download pretrained` | 147-159 | download sub | KEEP (simplify to protein_mpnn only) |
+| `train` | 167-197 | root | KEEP |
+| `checkpoints export-foundry` | 204-224 | checkpoints sub | **DELETE** |
+| `evaluate recovery` | 231-281 | evaluate sub | KEEP (simplify) |
+| `evaluate benchmark` | 283-339 | evaluate sub | **DELETE** |
+| `evaluate ddg` | 341-384 | evaluate sub | KEEP (simplify) |
+| `score` | 391-472 | root | KEEP (simplify) |
+
+**Commands to delete:**
+- `benchmark` (lines 283-339)
+- `nvidia-complexes` (lines 91-118)
+- `export-foundry` (lines 204-224)
+
+---
+
+### **8. TEST FILES FOR DELETION/EDITING**
+
+**Files to delete entirely:**
+- `/home/briney/git/teddympnn/tests/models/test_ligand_mpnn.py` — LigandMPNN tests only
+- `/home/briney/git/teddympnn/tests/evaluation/test_benchmark.py` — benchmark tests only
+- `/home/briney/git/teddympnn/tests/data/test_nvidia_complexes.py` — NVIDIA tests only
+- `/home/briney/git/teddympnn/tests/weights/test_legacy.py` — legacy weight export tests (lines testing `convert_to_legacy` and `_restore_120th_atom_type`; keep lines testing `load_legacy_weights`)
+
+**Files needing edits:**
+
+1. `/home/briney/git/teddympnn/tests/test_config.py` — remove or update tests for `ligand_mpnn` model_type and `num_context_atoms`
+
+2. `/home/briney/git/teddympnn/tests/test_cli.py` — remove or update:
+   - benchmark command tests
+   - export-foundry command tests
+   - nvidia-complexes command tests
+   - model_type="ligand_mpnn" option tests
+
+3. `/home/briney/git/teddympnn/tests/data/test_dataset.py` — remove or update:
+   - `include_ligand_atoms` parameter tests
+   - `atomize_partner_sidechains` parameter tests
+
+4. `/home/briney/git/teddympnn/tests/data/test_splits.py` — remove or update:
+   - `split_nvidia_manifest` tests
+   - NVIDIA handling in `prepare_manifests` tests
+
+5. `/home/briney/git/teddympnn/tests/evaluation/test_sequence_recovery.py` — check for `model_type="ligand_mpnn"` references; remove
+
+6. `/home/briney/git/teddympnn/tests/evaluation/test_skempi.py` — check for ligand-specific test cases; remove
+
+7. `/home/briney/git/teddympnn/tests/weights/test_foundry.py` — remove `export_foundry_checkpoint` tests; keep loading tests
+
+8. `/home/briney/git/teddympnn/tests/weights/test_io.py` — may need updates if it tests model_type selection
+
+9. `/home/briney/git/teddympnn/tests/validation/test_foundry_equivalence.py` — likely tests export; may need deletion or substantial rework
+
+---
+
+### **9. LINE COUNTS**
+
+| File | Total Lines | Ligand/NVIDIA Code | Post-Deletion Estimate |
+|------|-------------|-------------------|----------------------|
+| `data/teddymer.py` | 968 | ~0 (teddymer-only) | **968** (no change) |
+| `data/splits.py` | 418 | ~47 (split_nvidia_manifest) | **~371** |
+| `data/dataset.py` | 454 | ~95 (include_ligand_atoms, atomize_partner, Y context) | **~359** |
+| `training/trainer.py` | 520 | ~40 (is_ligand flag, include_ligand_atoms init) | **~480** |
+| `cli.py` | 471 | ~109 (nvidia-complexes, export-foundry, benchmark, model_type branches) | **~362** |
+
+---
+
+### **Summary Statistics**
+
+- **Standalone files to delete:** 5 files (~600 lines)
+  - `src/teddympnn/models/ligand_mpnn.py` (244 lines)
+  - `src/teddympnn/data/nvidia_complexes.py` (~250 lines)
+  - `src/teddympnn/evaluation/benchmark.py` (295 lines)
+  - `scripts/run_benchmark.py` (127 lines)
+  - `configs/benchmark.yaml` (36 lines)
+
+- **Test files to delete:** 3 files
+  - `tests/models/test_ligand_mpnn.py`
+  - `tests/evaluation/test_benchmark.py`
+  - `tests/data/test_nvidia_complexes.py`
+
+- **Functions to delete:** ~15 functions
+  - `extract_ligand_atoms`, `extract_sidechain_atoms` (data/features.py)
+  - `split_nvidia_manifest` (data/splits.py)
+  - `download_nvidia_*`, `filter_nvidia_*`, `extract_nvidia_*` (nvidia_complexes.py)
+  - `export_foundry_checkpoint` (weights/foundry.py)
+  - `convert_to_legacy` (weights/legacy.py)
+  - `_load_model`, `run_benchmark`, `print_comparison_table` (benchmark.py)
+
+- **Config fields to delete:** 5 fields
+  - `num_context_atoms` in ModelConfig
+  - `atomize_partner_sidechains`, `sidechain_atomization_probability`, `sidechain_atomization_per_residue_probability` in TrainingConfig
+  - `nvidia` entries in train.yaml
+
+- **CLI commands to delete:** 3 commands
+  - `download nvidia-complexes`
+  - `checkpoints export-foundry`
+  - `evaluate benchmark`</result>
+<usage><subagent_tokens>76322</subagent_tokens><tool_uses>39</tool_uses><duration_ms>94052</duration_ms></usage>
+</task-notification>
