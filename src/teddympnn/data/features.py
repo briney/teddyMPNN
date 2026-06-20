@@ -12,7 +12,7 @@ from typing import Any
 
 import numpy as np
 import torch
-from Bio.PDB import MMCIFParser, PDBParser  # type: ignore[attr-defined]
+from Bio.PDB import MMCIFParser, PDBParser
 from Bio.PDB.Residue import Residue  # noqa: TC002 — used in type annotations
 
 from teddympnn.models.tokens import (
@@ -60,9 +60,9 @@ def _get_parser(path: Path) -> PDBParser | MMCIFParser:
     """Select the appropriate BioPython parser based on file extension."""
     suffix = path.suffix.lower()
     if suffix in (".pdb", ".ent"):
-        return PDBParser(QUIET=True)  # type: ignore[no-untyped-call]
+        return PDBParser(QUIET=True)
     if suffix in (".cif", ".mmcif"):
-        return MMCIFParser(QUIET=True)  # type: ignore[no-untyped-call]
+        return MMCIFParser(QUIET=True)
     msg = f"Unsupported structure file format: {suffix}"
     raise ValueError(msg)
 
@@ -165,7 +165,7 @@ def parse_structure(path: str | Path) -> dict[str, Any]:
     """
     path = Path(path)
     parser = _get_parser(path)
-    structure = parser.get_structure("s", str(path))  # type: ignore[no-untyped-call]
+    structure = parser.get_structure("s", str(path))
     model = next(structure.get_models())
 
     all_coords: list[np.ndarray[Any, Any]] = []

@@ -18,7 +18,7 @@ cd teddympnn
 pip install -e ".[dev]"
 ```
 
-The editable install is required before running `pytest`, `mypy`, or the
+The editable install is required before running `pytest`, `ty`, or the
 `teddympnn` CLI from a checkout — the test suite imports the installed
 `teddympnn` package, not the `src/` directory.
 
@@ -129,7 +129,7 @@ ruff check src/ tests/
 ruff format src/ tests/
 
 # Type check
-mypy src/
+ty check src/
 
 # Run tests
 pytest

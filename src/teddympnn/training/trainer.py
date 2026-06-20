@@ -127,7 +127,7 @@ class Trainer:
         self.use_amp = config.mixed_precision and self.device.type == "cuda"
         self.amp_dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
         use_scaler = self.use_amp and self.amp_dtype == torch.float16
-        self.scaler = torch.amp.GradScaler("cuda", enabled=use_scaler)  # type: ignore[attr-defined]
+        self.scaler = torch.amp.GradScaler("cuda", enabled=use_scaler)
 
         # Data loaders
         self.train_loader = train_loader
@@ -279,7 +279,7 @@ class Trainer:
         self.model.train()
         batch = self._move_batch(batch)
 
-        with torch.amp.autocast("cuda", dtype=self.amp_dtype, enabled=self.use_amp):  # type: ignore[attr-defined]
+        with torch.amp.autocast("cuda", dtype=self.amp_dtype, enabled=self.use_amp):
             output = self.model(batch)
             weights = (
                 1.0 + (self.config.interface_weight - 1.0) * batch["interface_residue_mask"].float()
@@ -325,7 +325,7 @@ class Trainer:
         for batch in self.val_loader:
             batch = self._move_batch(batch)
 
-            with torch.amp.autocast("cuda", dtype=self.amp_dtype, enabled=self.use_amp):  # type: ignore[attr-defined]
+            with torch.amp.autocast("cuda", dtype=self.amp_dtype, enabled=self.use_amp):
                 output = self.model(batch)
                 weights = (
                     1.0
@@ -458,7 +458,7 @@ class Trainer:
 
         epoch = 0
         if hasattr(self.train_loader, "set_epoch"):
-            self.train_loader.set_epoch(epoch)
+            self.train_loader.set_epoch(epoch)  # ty: ignore[call-non-callable]
         data_iter = iter(self.train_loader)
 
         while self.global_step < self.config.max_steps:
@@ -468,7 +468,7 @@ class Trainer:
             except StopIteration:
                 epoch += 1
                 if hasattr(self.train_loader, "set_epoch"):
-                    self.train_loader.set_epoch(epoch)
+                    self.train_loader.set_epoch(epoch)  # ty: ignore[call-non-callable]
                 data_iter = iter(self.train_loader)
                 batch = next(data_iter)
 

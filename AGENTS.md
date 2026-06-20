@@ -20,7 +20,7 @@ TODO: Fill in as the project develops.
 - Test: `pytest`
 - Lint: `ruff check src/ tests/`
 - Format: `ruff format src/ tests/`
-- Type check: `mypy src/`
+- Type check: `ty check src/`
 
 Always run tests and lint before considering work complete.
 
