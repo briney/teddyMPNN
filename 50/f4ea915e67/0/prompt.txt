@@ -1,0 +1,1 @@
+In README.md, is there a reason all of the examples use `python -m teddympnn` rather than the `teddympnn` cli command directly? It's cleaner as just `teddympnn ...`, without the `python -m` business.
