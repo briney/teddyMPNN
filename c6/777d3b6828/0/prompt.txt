@@ -1,0 +1,1 @@
+all of the agent dotfiles/dotfolders (.claude, .codex, etc) are being tracked in git. I'd prefer that they aren't, as this clutters the repo. How do we remove them?
