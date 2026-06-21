@@ -180,6 +180,12 @@ cython_debug/
 .cursorignore
 .cursorindexingignore
 
+# AI agent / editor tool configs (personal, not shared in the repo).
+# .entire/ is intentionally tracked (shares checkpoint settings with the team).
+.claude/
+.codex/
+.cursor/
+
 # macOS
 .DS_Store
 
