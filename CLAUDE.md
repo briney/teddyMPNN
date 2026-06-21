@@ -19,7 +19,7 @@ ruff format src/ tests/
 ty check src/
 
 # CLI
-python -m teddympnn --help
+teddympnn --help
 ```
 
 ## Project Structure

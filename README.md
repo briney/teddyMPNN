@@ -43,7 +43,7 @@ The editable install is required before running `pytest`, `ty`, or the
 ### Score a structure
 
 ```bash
-python -m teddympnn score \
+teddympnn score \
     --checkpoint weights/step_0300000.pt \
     --pdb structure.pdb \
     --chains A \
@@ -53,7 +53,7 @@ python -m teddympnn score \
 ### Evaluate interface sequence recovery
 
 ```bash
-python -m teddympnn evaluate recovery \
+teddympnn evaluate recovery \
     --checkpoint weights/step_0300000.pt \
     --data data/manifests/val_manifest.tsv
 ```
@@ -61,7 +61,7 @@ python -m teddympnn evaluate recovery \
 ### Evaluate binding affinity on SKEMPI v2.0
 
 ```bash
-python -m teddympnn evaluate ddg \
+teddympnn evaluate ddg \
     --checkpoint weights/step_0300000.pt \
     --skempi data/skempi \
     --num-samples 20
@@ -84,13 +84,13 @@ citations.
 ### 1. Download teddymer
 
 ```bash
-python -m teddympnn download teddymer --output data/teddymer
+teddympnn download teddymer --output data/teddymer
 ```
 
 ### 2. Prepare train/val manifests
 
 ```bash
-python -m teddympnn download prepare-manifests \
+teddympnn download prepare-manifests \
     --output data/manifests \
     --teddymer data/teddymer/filtered_manifest.tsv \
     --val-fraction 0.05
@@ -100,13 +100,13 @@ python -m teddympnn download prepare-manifests \
 
 ```bash
 # Default run (uses configs/train.yaml)
-python -m teddympnn train
+teddympnn train
 
 # Override individual knobs Hydra-style
-python -m teddympnn train train.interface_weight=3.0 max_steps=100000
+teddympnn train train.interface_weight=3.0 max_steps=100000
 
 # Resume from checkpoint
-python -m teddympnn train --resume outputs/train/checkpoints/step_0050000.pt
+teddympnn train --resume outputs/train/checkpoints/step_0050000.pt
 ```
 
 The `interface_weight` config knob scales the loss at interface residues.
