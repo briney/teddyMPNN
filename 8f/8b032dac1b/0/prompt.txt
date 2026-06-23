@@ -1,0 +1,9 @@
+It's a bit concerning that 2 of the 3 TED download attempts failed. How exactly is the API request made? On your example above (`AF-A0A009ESU5-F1-model_v4_TED01`), searching on the TED website fails with the full AFDB name (`AF-A0A009ESU5-F1-model_v4`) but succeeds when using just the UniProt identifier (`A0A009ESU5`). What's being used to query the TED API?
+
+---
+
+IIRC, AFDB has moved to v6 -- could that be why the AFDB query is hitting a 404?
+
+---
+
+Yes, make the update
