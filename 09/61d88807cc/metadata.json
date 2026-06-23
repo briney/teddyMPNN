@@ -1,0 +1,28 @@
+{
+  "cli_version": "0.7.7",
+  "checkpoint_id": "0961d88807cc",
+  "strategy": "manual-commit",
+  "branch": "fix/teddymer-metadata-parse",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "docs/ARCHITECTURE.md",
+    "src/teddympnn/cli.py",
+    "src/teddympnn/data/teddymer.py",
+    "tests/data/test_teddymer.py"
+  ],
+  "sessions": [
+    {
+      "metadata": "/09/61d88807cc/0/metadata.json",
+      "transcript": "/09/61d88807cc/0/full.jsonl",
+      "content_hash": "/09/61d88807cc/0/content_hash.txt",
+      "prompt": "/09/61d88807cc/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 10032,
+    "cache_creation_tokens": 140006,
+    "cache_read_tokens": 7615107,
+    "output_tokens": 68928,
+    "api_call_count": 71
+  }
+}

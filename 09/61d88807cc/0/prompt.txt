@@ -1,0 +1,50 @@
+trying to download the teddymer dataset using `teddympnn download ...` and I'm getting the following error. Diagnose and make a plan to fix.
+
+teddympnn download teddymer --output data/teddymer
+teddymer.tar.gz ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 22.0/22.0 GB 10.8 MB/s 0:00:00
+╭─────────────────────────────────────────────────────────────── Traceback (most recent call last) ───────────────────────────────────────────────────────────────╮
+│ /home/briney/miniforge3/envs/ai/lib/python3.12/site-packages/teddympnn/cli.py:68 in teddymer                                                                    │
+│                                                                                                                                                                 │
+│    65 │   """Download and reconstruct teddymer full-atom synthetic dimers."""                                                                                   │
+│    66 │   from teddympnn.data.teddymer import TeddymerPrepareConfig, prepare_teddymer_data                                                                      │
+│    67 │                                                                                                                                                         │
+│ ❱  68 │   result = prepare_teddymer_data(                                                                                                                       │
+│    69 │   │   TeddymerPrepareConfig(                                                                                                                            │
+│    70 │   │   │   output_dir=output,                                                                                                                            │
+│    71 │   │   │   workers=workers,                                                                                                                              │
+│                                                                                                                                                                 │
+│ /home/briney/miniforge3/envs/ai/lib/python3.12/site-packages/teddympnn/data/teddymer.py:208 in prepare_teddymer_data                                            │
+│                                                                                                                                                                 │
+│   205 │   output_dir.mkdir(parents=True, exist_ok=True)                                                                                                         │
+│   206 │                                                                                                                                                         │
+│   207 │   extracted_dir = download_and_extract_teddymer(config)                                                                                                 │
+│ ❱ 208 │   indices = build_teddymer_indices(extracted_dir, output_dir)                                                                                           │
+│   209 │                                                                                                                                                         │
+│   210 │   logs_dir = output_dir / "logs"                                                                                                                        │
+│   211 │   logs_dir.mkdir(parents=True, exist_ok=True)                                                                                                           │
+│                                                                                                                                                                 │
+│ /home/briney/miniforge3/envs/ai/lib/python3.12/site-packages/teddympnn/data/teddymer.py:306 in build_teddymer_indices                                           │
+│                                                                                                                                                                 │
+│   303 │                                                                                                                                                         │
+│   304 │   dimer_source = _find_required_file(extracted_dir, "ted_afdb50_cath_dimerdb.source")                                                                   │
+│   305 │   rep_source = _find_required_file(extracted_dir, "teddymer_repdb.source")                                                                              │
+│ ❱ 306 │   dimer_lookup = _parse_dimer_source(dimer_source)                                                                                                      │
+│   307 │   all_records = _parse_representative_source(rep_source, dimer_lookup)                                                                                  │
+│   308 │   all_records = _merge_nonsingleton_metadata(all_records, nonsingleton_records)                                                                         │
+│   309                                                                                                                                                           │
+│                                                                                                                                                                 │
+│ /home/briney/miniforge3/envs/ai/lib/python3.12/site-packages/teddympnn/data/teddymer.py:585 in _parse_dimer_source                                              │
+│                                                                                                                                                                 │
+│   582 │   │   │   lookup.setdefault(key, record)                                                                                                                │
+│   583 │   if not lookup:                                                                                                                                        │
+│   584 │   │   msg = f"Could not parse any dimer records from {source_path}"                                                                                     │
+│ ❱ 585 │   │   raise ValueError(msg)                                                                                                                             │
+│   586 │   return lookup                                                                                                                                         │
+│   587                                                                                                                                                           │
+│   588                                                                                                                                                           │
+╰─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+ValueError: Could not parse any dimer records from data/teddymer/raw/teddymer/dir_ted_afdb50_cath_dimerdb/ted_afdb50_cath_dimerdb.source
+
+---
+
+Yes, make the fix on a new branch
