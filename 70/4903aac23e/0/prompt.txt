@@ -1,0 +1,1 @@
+add a concise sentence to ARCHITECTURE.md, then open the pull request (including this change)

@@ -1,0 +1,25 @@
+{
+  "cli_version": "0.7.7",
+  "checkpoint_id": "704903aac23e",
+  "strategy": "manual-commit",
+  "branch": "fix/teddymer-metadata-parse",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "docs/ARCHITECTURE.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/70/4903aac23e/0/metadata.json",
+      "transcript": "/70/4903aac23e/0/full.jsonl",
+      "content_hash": "/70/4903aac23e/0/content_hash.txt",
+      "prompt": "/70/4903aac23e/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 135,
+    "cache_creation_tokens": 1321,
+    "cache_read_tokens": 645262,
+    "output_tokens": 1037,
+    "api_call_count": 3
+  }
+}
