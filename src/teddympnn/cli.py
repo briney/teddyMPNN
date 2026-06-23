@@ -61,6 +61,10 @@ def teddymer(
         Path | None,
         typer.Option(help="Optional directory for caching downloaded TED-domain PDBs."),
     ] = None,
+    limit: Annotated[
+        int | None,
+        typer.Option(help="Reconstruct at most this many dimers (pilot/smoke runs)."),
+    ] = None,
 ) -> None:
     """Download and reconstruct teddymer full-atom synthetic dimers."""
     from teddympnn.data.teddymer import TeddymerPrepareConfig, prepare_teddymer_data
@@ -74,13 +78,11 @@ def teddymer(
             overwrite=overwrite,
             keep_archive=keep_archive,
             domain_cache_dir=domain_cache,
+            limit=limit,
         )
     )
     typer.echo(f"Teddymer metadata: {result.metadata_path}")
-    typer.echo(f"All dimers: {result.all_manifest_path} ({result.all_dimers})")
-    typer.echo(
-        f"Non-singleton dimers: {result.nonsingleton_manifest_path} ({result.nonsingleton_dimers})"
-    )
+    typer.echo(f"Dimers: {result.manifest_path} ({result.dimers})")
     if result.failures:
         typer.echo(f"Failures: {result.failures_path} ({result.failures})")
 
