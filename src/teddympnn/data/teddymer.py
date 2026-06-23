@@ -610,12 +610,33 @@ async def _reconstruct_one_record(
     return record.to_manifest_row(output_path)
 
 
+# Transient HTTP statuses worth retrying (rate-limiting / gateway hiccups under
+# concurrent load). TED returns a deterministic 500 for structures purged in the
+# AFDB v4->v6 transition, so 500 is treated as definitive and is NOT in this set.
+_RETRYABLE_HTTP_STATUS = frozenset({429, 502, 503, 504})
+
+
+class _TedHttpStatusError(RuntimeError):
+    """A definitive non-200 HTTP status from the TED API (e.g. 404/500).
+
+    Definitive statuses are not retried; a structure purged in the AFDB v4->v6
+    transition deterministically 500s, so retrying cannot help. Transient
+    statuses (see ``_RETRYABLE_HTTP_STATUS``) raise a plain error instead and
+    follow the normal retry path.
+    """
+
+
 async def _fetch_domain_pdb(
     session: aiohttp.ClientSession,
     ted_id: str,
     config: TeddymerPrepareConfig,
 ) -> str:
-    """Fetch a TED-domain PDB, optionally using a local cache."""
+    """Fetch a TED-domain PDB, optionally using a local cache.
+
+    Definitive HTTP statuses (e.g. 404/500) fail fast; transient errors
+    (timeouts, connection resets, and ``_RETRYABLE_HTTP_STATUS`` responses such
+    as 429/503) are retried with exponential backoff.
+    """
     cache_path: Path | None = None
     if config.domain_cache_dir is not None:
         cache_dir = Path(config.domain_cache_dir)
@@ -632,13 +653,17 @@ async def _fetch_domain_pdb(
                 if response.status != 200:
                     text: str = await response.text()
                     msg = f"GET {url} returned HTTP {response.status}: {text[:200]}"
-                    raise RuntimeError(msg)
+                    if response.status in _RETRYABLE_HTTP_STATUS:
+                        raise RuntimeError(msg)
+                    raise _TedHttpStatusError(msg)
                 text = await response.text()
                 if cache_path is not None:
                     tmp_path = cache_path.with_suffix(cache_path.suffix + ".part")
                     tmp_path.write_text(text)
                     tmp_path.replace(cache_path)
                 return text
+        except _TedHttpStatusError:
+            raise  # definitive server answer; retrying will not help
         except Exception as exc:
             last_error = exc
             if attempt < config.retries:

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING, Any
 
+import aiohttp
 import pandas as pd
 import pytest
 
@@ -267,3 +269,113 @@ class TestPrepareTeddymerData:
         assert result.failures == 0
         assert result.metadata_path.exists()
         assert result.manifest_path.exists()
+
+
+class _FakeResponse:
+    """Minimal stand-in for an aiohttp response."""
+
+    def __init__(self, status: int, text: str) -> None:
+        self.status = status
+        self._text = text
+
+    async def text(self) -> str:
+        return self._text
+
+
+class _FakeGet:
+    """Async context manager mimicking ``session.get(...)``."""
+
+    def __init__(self, item: _FakeResponse | Exception) -> None:
+        self._item = item
+
+    async def __aenter__(self) -> _FakeResponse:
+        if isinstance(self._item, Exception):
+            raise self._item
+        return self._item
+
+    async def __aexit__(self, *_exc: object) -> bool:
+        return False
+
+
+class _FakeSession:
+    """Yields queued responses/exceptions, repeating the last once exhausted."""
+
+    def __init__(self, items: list[_FakeResponse | Exception]) -> None:
+        self._items = list(items)
+        self._current: _FakeResponse | Exception | None = None
+        self.calls = 0
+
+    def get(self, _url: str, headers: dict[str, str] | None = None) -> _FakeGet:
+        self.calls += 1
+        if self._items:
+            self._current = self._items.pop(0)
+        assert self._current is not None
+        return _FakeGet(self._current)
+
+
+class TestFetchDomainPdb:
+    @staticmethod
+    def _config() -> TeddymerPrepareConfig:
+        return TeddymerPrepareConfig(retries=3)
+
+    @pytest.fixture(autouse=True)
+    def _no_backoff(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        async def _instant(_seconds: float) -> None:
+            return None
+
+        monkeypatch.setattr(teddymer_module.asyncio, "sleep", _instant)
+
+    @pytest.mark.parametrize("status", [404, 500])
+    def test_http_error_status_is_not_retried(self, status: int) -> None:
+        session = _FakeSession([_FakeResponse(status, "nope")])
+
+        with pytest.raises(RuntimeError, match=f"HTTP {status}"):
+            asyncio.run(
+                teddymer_module._fetch_domain_pdb(
+                    session, "AF-A0A009ESU5-F1-model_v4_TED01", self._config()
+                )
+            )
+
+        # A definitive HTTP status is not retried.
+        assert session.calls == 1
+
+    def test_transient_error_is_retried_then_succeeds(self) -> None:
+        pdb = _min_full_atom_pdb("Z", 1)
+        session = _FakeSession([aiohttp.ClientError("connection reset"), _FakeResponse(200, pdb)])
+
+        result = asyncio.run(
+            teddymer_module._fetch_domain_pdb(
+                session, "AF-A0A009ESU5-F1-model_v4_TED01", self._config()
+            )
+        )
+
+        assert result == pdb
+        assert session.calls == 2
+
+    @pytest.mark.parametrize("status", [429, 503])
+    def test_transient_http_status_is_retried_then_succeeds(self, status: int) -> None:
+        # 429/5xx-gateway statuses are transient (e.g. TED rate-limiting under
+        # concurrent load) and must be retried, unlike the definitive 404/500.
+        pdb = _min_full_atom_pdb("Z", 1)
+        session = _FakeSession([_FakeResponse(status, "busy"), _FakeResponse(200, pdb)])
+
+        result = asyncio.run(
+            teddymer_module._fetch_domain_pdb(
+                session, "AF-A0A009ESU5-F1-model_v4_TED01", self._config()
+            )
+        )
+
+        assert result == pdb
+        assert session.calls == 2
+
+    def test_transient_error_exhausts_retries(self) -> None:
+        session = _FakeSession([aiohttp.ClientError("connection reset")])
+
+        with pytest.raises(RuntimeError, match="after 3 attempts"):
+            asyncio.run(
+                teddymer_module._fetch_domain_pdb(
+                    session, "AF-A0A009ESU5-F1-model_v4_TED01", self._config()
+                )
+            )
+
+        assert session.calls == 3
