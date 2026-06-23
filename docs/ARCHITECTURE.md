@@ -108,8 +108,14 @@ Each checkpoint saves a teddyMPNN-native bundle:
 dimers (AFDB domains split at CATH boundaries). Filtering criteria:
 interface pLDDT > 70, ipAE < 10, interface length > 10 residues.
 
-Pipeline: download teddymer archive → parse metadata + source indices →
-fetch TED-domain PDBs → relabel chains A/B → write dimers + manifests.
+Pipeline: download teddymer archive → read `nonsingletonrep_metadata.tsv`
+(non-singleton cluster representatives + interface metrics) → fetch the paired
+TED-domain PDBs from the TED API → relabel chains A/B → write dimers + manifest.
+The archive's `.source`/`.lookup` FoldSeek databases (~10M dimers) are not used.
+Expect ~10-17% of dimers to be unrecoverable: their AlphaFold structures were
+purged in the AFDB v4→v6 transition, so TED deterministically returns HTTP 500
+(fail-fast; transient 429/503 are retried) — these are logged to `failures.tsv`
+and skipped.
 
 ### Evaluation: PDB experimental complexes
 

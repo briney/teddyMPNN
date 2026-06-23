@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import re
 import shutil
 import tarfile
@@ -37,9 +36,11 @@ TED_DOMAIN_URL_TEMPLATE = "https://ted.cathdb.info/api/v1/files/{ted_id}.pdb"
 
 METADATA_FILENAME = "nonsingletonrep_metadata.tsv"
 CLUSTER_FILENAME = "cluster.tsv"
-ALL_INDEX_FILENAME = "all_representatives.tsv"
-NONSINGLETON_INDEX_FILENAME = "nonsingleton_representatives.tsv"
+REPRESENTATIVES_FILENAME = "representatives.tsv"
 FAILURES_FILENAME = "failures.tsv"
+
+# AlphaFold DB model version embedded in TED domain identifiers.
+TED_MODEL_VERSION = "v4"
 
 TRAINING_MANIFEST_COLUMNS: tuple[str, ...] = (
     "structure_path",
@@ -64,18 +65,8 @@ INDEX_COLUMNS: tuple[str, ...] = (
     "avg_int_plddt",
 )
 
-_AF_TED_RE = re.compile(
-    r"AF-(?P<uniprot>[A-Za-z0-9]+)-F(?P<fragment>\d+)-model_v(?P<version>\d+)_"
-    r"(?P<domain>TED\d+)",
-    re.IGNORECASE,
-)
-_DIMER_TED_RE = re.compile(
-    r"(?P<dimer>\d+)DI_(?P<uniprot>[A-Za-z0-9]+)_v(?P<version>\d+)_"
-    r"(?P<domain>TED\d+)",
-    re.IGNORECASE,
-)
+_AF_STEM_RE = re.compile(r"AF-(?P<acc>[A-Za-z0-9]+)-F\d+-model", re.IGNORECASE)
 _TED_DOMAIN_RE = re.compile(r"TED\d+", re.IGNORECASE)
-_INTEGER_RE = re.compile(r"\d+")
 _SAFE_STEM_RE = re.compile(r"[^A-Za-z0-9_.-]+")
 
 
@@ -93,6 +84,8 @@ class TeddymerPrepareConfig:
         keep_archive: Keep ``teddymer.tar.gz`` after extraction.
         domain_cache_dir: Optional cache for downloaded TED-domain PDBs. Leave
             unset to avoid storing one extra full copy of the domain data.
+        limit: Reconstruct at most this many representative dimers. Useful for
+            pilot/smoke runs; leave unset to process the full set.
     """
 
     output_dir: Path = Path("data/teddymer")
@@ -103,6 +96,7 @@ class TeddymerPrepareConfig:
     overwrite: bool = False
     keep_archive: bool = True
     domain_cache_dir: Path | None = None
+    limit: int | None = None
 
 
 @dataclass(frozen=True)
@@ -164,8 +158,7 @@ class TeddymerIndices:
 
     metadata_path: Path
     cluster_path: Path | None
-    all_representatives_path: Path
-    nonsingleton_representatives_path: Path
+    representatives_path: Path
 
 
 @dataclass(frozen=True)
@@ -183,11 +176,9 @@ class TeddymerPrepareResult:
     """Summary of the complete Teddymer preparation workflow."""
 
     metadata_path: Path
-    all_manifest_path: Path
-    nonsingleton_manifest_path: Path
+    manifest_path: Path
     failures_path: Path
-    all_dimers: int
-    nonsingleton_dimers: int
+    dimers: int
     failures: int
 
 
@@ -198,40 +189,32 @@ def prepare_teddymer_data(config: TeddymerPrepareConfig | None = None) -> Teddym
         config: Workflow configuration. Defaults to ``TeddymerPrepareConfig()``.
 
     Returns:
-        Paths and counts for the generated metadata, manifests, and failures.
+        Paths and counts for the generated metadata, manifest, and failures.
     """
     config = config or TeddymerPrepareConfig()
     output_dir = Path(config.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     extracted_dir = download_and_extract_teddymer(config)
-    indices = build_teddymer_indices(extracted_dir, output_dir)
+    indices = build_teddymer_indices(extracted_dir, output_dir, limit=config.limit)
 
     logs_dir = output_dir / "logs"
     logs_dir.mkdir(parents=True, exist_ok=True)
     failures_path = logs_dir / FAILURES_FILENAME
 
-    all_result = reconstruct_teddymer_dimers(
-        indices.all_representatives_path,
-        output_dir / "all_dimers",
+    result = reconstruct_teddymer_dimers(
+        indices.representatives_path,
+        output_dir / "dimers",
         config,
         failures_path=failures_path,
     )
-    nonsingleton_manifest = link_nonsingleton_subset(
-        all_result.manifest_path,
-        indices.nonsingleton_representatives_path,
-        output_dir / "nonsingleton_dimers",
-    )
-    nonsingleton_count = len(pd.read_csv(nonsingleton_manifest, sep="\t"))
 
     return TeddymerPrepareResult(
         metadata_path=indices.metadata_path,
-        all_manifest_path=all_result.manifest_path,
-        nonsingleton_manifest_path=nonsingleton_manifest,
+        manifest_path=result.manifest_path,
         failures_path=failures_path,
-        all_dimers=all_result.success_count,
-        nonsingleton_dimers=nonsingleton_count,
-        failures=all_result.failure_count,
+        dimers=result.success_count,
+        failures=result.failure_count,
     )
 
 
@@ -270,12 +253,24 @@ def download_and_extract_teddymer(config: TeddymerPrepareConfig) -> Path:
     return extracted_dir
 
 
-def build_teddymer_indices(extracted_dir: str | Path, output_dir: str | Path) -> TeddymerIndices:
-    """Build normalized all-representative and non-singleton Teddymer indices.
+def build_teddymer_indices(
+    extracted_dir: str | Path,
+    output_dir: str | Path,
+    *,
+    limit: int | None = None,
+) -> TeddymerIndices:
+    """Build the normalized non-singleton representative index from metadata.
+
+    The Teddymer archive's curated ``nonsingletonrep_metadata.tsv`` is the
+    source of truth for the training set: each row is one non-singleton cluster
+    representative with its UniProt model stem, TED domain pair, and interface
+    metrics. The full ``.source``/``.lookup`` FoldSeek databases enumerate all
+    ~10M dimers and are not used here.
 
     Args:
         extracted_dir: Directory containing extracted Teddymer archive contents.
         output_dir: Root output directory for normalized metadata files.
+        limit: Keep at most this many records (pilot/smoke runs).
 
     Returns:
         Paths to generated metadata/index files.
@@ -294,36 +289,21 @@ def build_teddymer_indices(extracted_dir: str | Path, output_dir: str | Path) ->
         cluster_path = metadata_dir / CLUSTER_FILENAME
         shutil.copy2(cluster_src, cluster_path)
 
-    nonsingleton_records = _records_from_metadata(metadata_path)
-    nonsingleton_records = [
-        record
-        for record in nonsingleton_records
-        if record.member_count is None or record.member_count > 1
+    records = _records_from_metadata(metadata_path)
+    records = [
+        record for record in records if record.member_count is None or record.member_count > 1
     ]
+    if limit is not None:
+        records = records[:limit]
 
-    dimer_source = _find_required_file(extracted_dir, "ted_afdb50_cath_dimerdb.source")
-    rep_source = _find_required_file(extracted_dir, "teddymer_repdb.source")
-    dimer_lookup = _parse_dimer_source(dimer_source)
-    all_records = _parse_representative_source(rep_source, dimer_lookup)
-    all_records = _merge_nonsingleton_metadata(all_records, nonsingleton_records)
-
-    all_path = metadata_dir / ALL_INDEX_FILENAME
-    nonsingleton_path = metadata_dir / NONSINGLETON_INDEX_FILENAME
-    _write_records(all_records, all_path)
-    _write_records(nonsingleton_records, nonsingleton_path)
-
-    logger.info("Wrote %d all-representative records to %s", len(all_records), all_path)
-    logger.info(
-        "Wrote %d non-singleton representative records to %s",
-        len(nonsingleton_records),
-        nonsingleton_path,
-    )
+    representatives_path = metadata_dir / REPRESENTATIVES_FILENAME
+    _write_records(records, representatives_path)
+    logger.info("Wrote %d representative records to %s", len(records), representatives_path)
 
     return TeddymerIndices(
         metadata_path=metadata_path,
         cluster_path=cluster_path,
-        all_representatives_path=all_path,
-        nonsingleton_representatives_path=nonsingleton_path,
+        representatives_path=representatives_path,
     )
 
 
@@ -392,59 +372,6 @@ def reconstruct_teddymer_dimers(
     )
 
 
-def link_nonsingleton_subset(
-    all_manifest: str | Path,
-    nonsingleton_index: str | Path,
-    output_dir: str | Path,
-) -> Path:
-    """Create the non-singleton dimer directory as a subset of all dimers.
-
-    Args:
-        all_manifest: Manifest for the reconstructed all-representative dimers.
-        nonsingleton_index: Non-singleton representative index.
-        output_dir: Directory to receive linked/copied PDBs and ``manifest.tsv``.
-
-    Returns:
-        Path to the non-singleton training manifest.
-    """
-    all_manifest = Path(all_manifest)
-    nonsingleton_index = Path(nonsingleton_index)
-    output_dir = Path(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    all_df = pd.read_csv(all_manifest, sep="\t")
-    non_df = pd.read_csv(nonsingleton_index, sep="\t")
-    all_by_key = {str(row["dimer_index"]): row for _, row in all_df.iterrows()}
-
-    manifest_rows: list[dict[str, Any]] = []
-    for _, index_row in non_df.iterrows():
-        key = str(index_row["dimer_index"])
-        if key not in all_by_key:
-            logger.warning("Skipping non-singleton dimer %s absent from all-dimer manifest", key)
-            continue
-
-        source_row = all_by_key[key]
-        source_path = Path(str(source_row["structure_path"]))
-        record = _record_from_series(index_row)
-        target_path = output_dir / f"{record.output_stem}.pdb"
-        _link_or_copy(source_path, target_path)
-
-        row = record.to_manifest_row(target_path)
-        manifest_rows.append(row)
-
-    manifest = pd.DataFrame(manifest_rows)
-    manifest_path = output_dir / "manifest.tsv"
-    if not manifest.empty:
-        leading = list(TRAINING_MANIFEST_COLUMNS)
-        trailing = [column for column in manifest.columns if column not in leading]
-        manifest = manifest[leading + trailing]
-    else:
-        manifest = pd.DataFrame(columns=list(TRAINING_MANIFEST_COLUMNS))
-    manifest.to_csv(manifest_path, sep="\t", index=False)
-    logger.info("Linked/copied %d non-singleton Teddymer dimers to %s", len(manifest), output_dir)
-    return manifest_path
-
-
 def download_teddymer_metadata(output_dir: str | Path) -> Path:
     """Backward-compatible helper that downloads and extracts Teddymer metadata.
 
@@ -484,12 +411,7 @@ def _download_with_progress(url: str, dest: Path, chunk_size: int = 1 << 20) -> 
 
 def _contains_teddymer_inputs(path: Path) -> bool:
     """Return True if an extracted archive directory contains required files."""
-    return (
-        path.exists()
-        and _find_optional_file(path, METADATA_FILENAME) is not None
-        and _find_optional_file(path, "teddymer_repdb.source") is not None
-        and _find_optional_file(path, "ted_afdb50_cath_dimerdb.source") is not None
-    )
+    return path.exists() and _find_optional_file(path, METADATA_FILENAME) is not None
 
 
 def _find_required_file(root: Path, filename: str) -> Path:
@@ -525,15 +447,15 @@ def _records_from_metadata(metadata_path: Path) -> list[TeddymerDimerRecord]:
     records: list[TeddymerDimerRecord] = []
     for _, row in df.iterrows():
         dimer_index = str(row[columns["dimerindex"]])
-        uniprot_id = str(row[columns["uniprotid"]])
+        model_stem = str(row[columns["uniprotid"]])
         domain_a, domain_b = _split_domain_pair(str(row[columns["domainpair"]]))
         record = TeddymerDimerRecord(
             rep_id=dimer_index,
             dimer_index=dimer_index,
-            uniprot_id=uniprot_id,
+            uniprot_id=_bare_accession(model_stem),
             domain_pair=f"{domain_a}:{domain_b}",
-            domain_a_ted_id=_ted_api_id(uniprot_id, domain_a),
-            domain_b_ted_id=_ted_api_id(uniprot_id, domain_b),
+            domain_a_ted_id=_ted_domain_id(model_stem, domain_a),
+            domain_b_ted_id=_ted_domain_id(model_stem, domain_b),
             member_count=_optional_int(row, columns.get("membercount")),
             interface_residues=_optional_int(row, columns.get("interfacelength")),
             avg_int_pae=_optional_float(row, columns.get("avgintpae")),
@@ -552,9 +474,20 @@ def _split_domain_pair(domain_pair: str) -> tuple[str, str]:
     return parts[0], parts[1]
 
 
-def _ted_api_id(uniprot_id: str, domain: str) -> str:
-    """Build the TED API file stem for a UniProt/domain pair."""
-    return f"AF-{uniprot_id}-F1-model_v4_{domain.upper()}"
+def _ted_domain_id(model_stem: str, domain: str) -> str:
+    """Build the TED API file stem from an AlphaFold model stem and TED domain.
+
+    The metadata ``UniProtID`` is already the full AlphaFold model stem
+    (e.g. ``AF-A0A009ESU5-F1-model``); the TED domain PDB id appends the model
+    version and domain (``AF-A0A009ESU5-F1-model_v4_TED01``).
+    """
+    return f"{model_stem}_{TED_MODEL_VERSION}_{domain.upper()}"
+
+
+def _bare_accession(model_stem: str) -> str:
+    """Extract the bare UniProt accession from an AlphaFold model stem."""
+    match = _AF_STEM_RE.match(model_stem)
+    return match.group("acc") if match is not None else model_stem
 
 
 def _optional_int(row: pd.Series, column: str | None) -> int | None:
@@ -569,183 +502,6 @@ def _optional_float(row: pd.Series, column: str | None) -> float | None:
     if column is None or pd.isna(row[column]):
         return None
     return float(row[column])
-
-
-def _parse_dimer_source(source_path: Path) -> dict[str, TeddymerDimerRecord]:
-    """Parse ``ted_afdb50_cath_dimerdb.source`` into lookup records."""
-    lookup: dict[str, TeddymerDimerRecord] = {}
-    for ordinal, entry in enumerate(_iter_source_entries(source_path)):
-        record = _parse_source_entry(entry, fallback_index=str(ordinal))
-        if record is None:
-            continue
-        for key in {record.dimer_index, str(ordinal), str(ordinal + 1)}:
-            lookup.setdefault(key, record)
-    if not lookup:
-        msg = f"Could not parse any dimer records from {source_path}"
-        raise ValueError(msg)
-    return lookup
-
-
-def _parse_representative_source(
-    source_path: Path,
-    dimer_lookup: dict[str, TeddymerDimerRecord],
-) -> list[TeddymerDimerRecord]:
-    """Parse ``teddymer_repdb.source`` and resolve entries to dimer records."""
-    records: list[TeddymerDimerRecord] = []
-    seen: set[str] = set()
-    for ordinal, entry in enumerate(_iter_source_entries(source_path)):
-        direct = _parse_source_entry(entry, fallback_index=str(ordinal))
-        if direct is not None:
-            record = direct
-        else:
-            key = _extract_dimer_index(entry)
-            if key is None:
-                logger.debug("Could not parse Teddymer representative source entry: %s", entry)
-                continue
-            lookup_record = dimer_lookup.get(key)
-            if lookup_record is None:
-                logger.debug("Representative source entry %s not found in dimer source", key)
-                continue
-            record = lookup_record
-
-        rep_id = _representative_id(entry, record)
-        record = TeddymerDimerRecord(
-            rep_id=rep_id,
-            dimer_index=record.dimer_index,
-            uniprot_id=record.uniprot_id,
-            domain_pair=record.domain_pair,
-            domain_a_ted_id=record.domain_a_ted_id,
-            domain_b_ted_id=record.domain_b_ted_id,
-            member_count=record.member_count,
-            interface_residues=record.interface_residues,
-            avg_int_pae=record.avg_int_pae,
-            avg_int_plddt=record.avg_int_plddt,
-        )
-        dedupe_key = f"{record.dimer_index}:{record.domain_pair}"
-        if dedupe_key in seen:
-            continue
-        seen.add(dedupe_key)
-        records.append(record)
-
-    if not records:
-        msg = f"Could not parse any representative records from {source_path}"
-        raise ValueError(msg)
-    return records
-
-
-def _iter_source_entries(source_path: Path) -> list[str]:
-    """Read a FoldSeek/MMseqs source file as newline- or NUL-separated text."""
-    data = source_path.read_bytes()
-    text = data.decode("utf-8", errors="replace")
-    entries = [entry.strip() for entry in re.split(r"[\0\r\n]+", text) if entry.strip()]
-    return entries
-
-
-def _parse_source_entry(entry: str, *, fallback_index: str) -> TeddymerDimerRecord | None:
-    """Parse a source entry that directly names a Teddymer dimer."""
-    af_matches = list(_AF_TED_RE.finditer(entry))
-    if len(af_matches) >= 2:
-        first = af_matches[0]
-        second = af_matches[1]
-        uniprot = first.group("uniprot")
-        domain_a = first.group("domain").upper()
-        domain_b = second.group("domain").upper()
-        dimer_index = _extract_dimer_index(entry) or fallback_index
-        return TeddymerDimerRecord(
-            rep_id=dimer_index,
-            dimer_index=dimer_index,
-            uniprot_id=uniprot,
-            domain_pair=f"{domain_a}:{domain_b}",
-            domain_a_ted_id=first.group(0),
-            domain_b_ted_id=second.group(0),
-        )
-
-    dimer_matches = list(_DIMER_TED_RE.finditer(entry))
-    if len(dimer_matches) >= 2:
-        first = dimer_matches[0]
-        second = dimer_matches[1]
-        uniprot = first.group("uniprot")
-        domain_a = first.group("domain").upper()
-        domain_b = second.group("domain").upper()
-        dimer_index = first.group("dimer")
-        return TeddymerDimerRecord(
-            rep_id=dimer_index,
-            dimer_index=dimer_index,
-            uniprot_id=uniprot,
-            domain_pair=f"{domain_a}:{domain_b}",
-            domain_a_ted_id=_ted_api_id(uniprot, domain_a),
-            domain_b_ted_id=_ted_api_id(uniprot, domain_b),
-        )
-
-    dimer_match = _DIMER_TED_RE.search(entry)
-    ted_domains = [match.group(0).upper() for match in _TED_DOMAIN_RE.finditer(entry)]
-    if dimer_match is not None and len(ted_domains) >= 2:
-        uniprot = dimer_match.group("uniprot")
-        dimer_index = dimer_match.group("dimer")
-        domain_a, domain_b = ted_domains[0], ted_domains[1]
-        return TeddymerDimerRecord(
-            rep_id=dimer_index,
-            dimer_index=dimer_index,
-            uniprot_id=uniprot,
-            domain_pair=f"{domain_a}:{domain_b}",
-            domain_a_ted_id=_ted_api_id(uniprot, domain_a),
-            domain_b_ted_id=_ted_api_id(uniprot, domain_b),
-        )
-
-    return None
-
-
-def _extract_dimer_index(entry: str) -> str | None:
-    """Extract a dimer index from a source entry."""
-    dimer_match = _DIMER_TED_RE.search(entry)
-    if dimer_match is not None:
-        return dimer_match.group("dimer")
-    fields = re.split(r"[\t ]+", entry.strip())
-    for field in fields:
-        if field.isdigit():
-            return field
-    integer_match = _INTEGER_RE.search(entry)
-    return integer_match.group(0) if integer_match is not None else None
-
-
-def _representative_id(entry: str, record: TeddymerDimerRecord) -> str:
-    """Choose a stable representative identifier from a source entry."""
-    fields = [field.strip() for field in re.split(r"\t+", entry) if field.strip()]
-    for field in fields:
-        if _AF_TED_RE.search(field) or _DIMER_TED_RE.search(field):
-            continue
-        if field != record.dimer_index:
-            return field
-    return record.rep_id or record.dimer_index
-
-
-def _merge_nonsingleton_metadata(
-    all_records: list[TeddymerDimerRecord],
-    nonsingleton_records: list[TeddymerDimerRecord],
-) -> list[TeddymerDimerRecord]:
-    """Overlay non-singleton metrics onto matching all-representative records."""
-    metadata_by_dimer = {record.dimer_index: record for record in nonsingleton_records}
-    merged: list[TeddymerDimerRecord] = []
-    for record in all_records:
-        metadata = metadata_by_dimer.get(record.dimer_index)
-        if metadata is None:
-            merged.append(record)
-            continue
-        merged.append(
-            TeddymerDimerRecord(
-                rep_id=record.rep_id,
-                dimer_index=record.dimer_index,
-                uniprot_id=metadata.uniprot_id,
-                domain_pair=metadata.domain_pair,
-                domain_a_ted_id=metadata.domain_a_ted_id,
-                domain_b_ted_id=metadata.domain_b_ted_id,
-                member_count=metadata.member_count,
-                interface_residues=metadata.interface_residues,
-                avg_int_pae=metadata.avg_int_pae,
-                avg_int_plddt=metadata.avg_int_plddt,
-            )
-        )
-    return merged
 
 
 def _write_records(records: list[TeddymerDimerRecord], path: Path) -> None:
@@ -854,12 +610,33 @@ async def _reconstruct_one_record(
     return record.to_manifest_row(output_path)
 
 
+# Transient HTTP statuses worth retrying (rate-limiting / gateway hiccups under
+# concurrent load). TED returns a deterministic 500 for structures purged in the
+# AFDB v4->v6 transition, so 500 is treated as definitive and is NOT in this set.
+_RETRYABLE_HTTP_STATUS = frozenset({429, 502, 503, 504})
+
+
+class _TedHttpStatusError(RuntimeError):
+    """A definitive non-200 HTTP status from the TED API (e.g. 404/500).
+
+    Definitive statuses are not retried; a structure purged in the AFDB v4->v6
+    transition deterministically 500s, so retrying cannot help. Transient
+    statuses (see ``_RETRYABLE_HTTP_STATUS``) raise a plain error instead and
+    follow the normal retry path.
+    """
+
+
 async def _fetch_domain_pdb(
     session: aiohttp.ClientSession,
     ted_id: str,
     config: TeddymerPrepareConfig,
 ) -> str:
-    """Fetch a TED-domain PDB, optionally using a local cache."""
+    """Fetch a TED-domain PDB, optionally using a local cache.
+
+    Definitive HTTP statuses (e.g. 404/500) fail fast; transient errors
+    (timeouts, connection resets, and ``_RETRYABLE_HTTP_STATUS`` responses such
+    as 429/503) are retried with exponential backoff.
+    """
     cache_path: Path | None = None
     if config.domain_cache_dir is not None:
         cache_dir = Path(config.domain_cache_dir)
@@ -876,13 +653,17 @@ async def _fetch_domain_pdb(
                 if response.status != 200:
                     text: str = await response.text()
                     msg = f"GET {url} returned HTTP {response.status}: {text[:200]}"
-                    raise RuntimeError(msg)
+                    if response.status in _RETRYABLE_HTTP_STATUS:
+                        raise RuntimeError(msg)
+                    raise _TedHttpStatusError(msg)
                 text = await response.text()
                 if cache_path is not None:
                     tmp_path = cache_path.with_suffix(cache_path.suffix + ".part")
                     tmp_path.write_text(text)
                     tmp_path.replace(cache_path)
                 return text
+        except _TedHttpStatusError:
+            raise  # definitive server answer; retrying will not help
         except Exception as exc:
             last_error = exc
             if attempt < config.retries:
@@ -955,14 +736,3 @@ def _looks_like_complete_pdb(path: Path) -> bool:
     except OSError:
         return False
     return "END" in tail
-
-
-def _link_or_copy(source: Path, target: Path) -> None:
-    """Hardlink ``source`` to ``target`` with copy fallback."""
-    target.parent.mkdir(parents=True, exist_ok=True)
-    if target.exists():
-        return
-    try:
-        os.link(source, target)
-    except OSError:
-        shutil.copy2(source, target)
