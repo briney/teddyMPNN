@@ -112,7 +112,9 @@ Pipeline: download teddymer archive → read `nonsingletonrep_metadata.tsv`
 (non-singleton cluster representatives + interface metrics) → fetch the paired
 TED-domain PDBs from the TED API → relabel chains A/B → write dimers + manifest.
 The archive's `.source`/`.lookup` FoldSeek databases (~10M dimers) are not used.
-Domains the TED API cannot serve (HTTP 5xx/404) are logged to `failures.tsv`
+Expect ~10-17% of dimers to be unrecoverable: their AlphaFold structures were
+purged in the AFDB v4→v6 transition, so TED deterministically returns HTTP 500
+(fail-fast; transient 429/503 are retried) — these are logged to `failures.tsv`
 and skipped.
 
 ### Evaluation: PDB experimental complexes
